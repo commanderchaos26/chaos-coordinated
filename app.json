@@ -30,12 +30,19 @@
     "android": {
       "package": "com.digitaldivide.chaoscoordinated",
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a8e01e90-c96c-4d01-a926-f0a830921b36"
+      }
+    },
+    "owner": "stalkingtheflock"
   }
 }
