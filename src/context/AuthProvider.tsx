@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    Linking.getInitialURL().then((url) => url && handleUrl(url));
+    Linking.getInitialURL().then((url) => { if (url) void handleUrl(url); });
     const linkSub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
 
     return () => {
