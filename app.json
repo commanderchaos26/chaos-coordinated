@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Chaos Coordinated",
+    "slug": "chaos-coordinated",
+    "scheme": "chaoscoordinated",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Chaos Coordinated uses your location only when you perform a work action that requires location verification."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Chaos Coordinated uses photos and videos as work evidence when you choose to attach them.",
+          "cameraPermission": "Chaos Coordinated uses the camera to capture work evidence when you choose to do so.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.digitaldivide.chaoscoordinated"
+    },
+    "android": {
+      "package": "com.digitaldivide.chaoscoordinated",
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
