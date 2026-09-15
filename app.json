@@ -21,6 +21,14 @@
           "cameraPermission": "Chaos Coordinated uses the camera to capture work evidence when you choose to do so.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#29D3B2",
+          "defaultChannelName": "Assignments"
+        }
       ]
     ],
     "ios": {
@@ -31,7 +39,8 @@
       "package": "com.digitaldivide.chaoscoordinated",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "experiments": {
