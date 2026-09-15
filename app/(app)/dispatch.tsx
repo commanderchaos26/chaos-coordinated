@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
+import { TextEntryModal } from '../../src/components/TextEntryModal';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { assignWorkOrder } from '../../src/lib/dispatchCommands';
 import { formatStatus, loadEmployeeDirectory } from '../../src/lib/employeeData';
@@ -17,7 +18,6 @@ type WorkOrder = {
   priority: string;
   due_at: string | null;
   department_id: string | null;
-  assigned_employee_id: string | null;
 };
 
 type AssignmentRow = { id: string; employee_id: string; work_order_id: string; status: string };
@@ -31,6 +31,11 @@ export default function DispatchScreen() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [overrideRequest, setOverrideRequest] = useState<{
+    employeeId: string;
+    employeeName: string;
+  } | null>(null);
+  const [overrideBusy, setOverrideBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -40,7 +45,7 @@ export default function DispatchScreen() {
       setMembership(current);
       if (!current || !canDispatch(current)) return;
       const [ordersResult, assignmentsResult, dirResult] = await Promise.all([
-        supabase.from('work_orders').select('id,title,status,priority,due_at,department_id,assigned_employee_id').eq('company_id', current.companyId).order('due_at', { ascending: true, nullsFirst: false }),
+        supabase.from('work_orders').select('id,title,status,priority,due_at,department_id').eq('company_id', current.companyId).order('due_at', { ascending: true, nullsFirst: false }),
         supabase.from('assignments').select('id,employee_id,work_order_id,status').eq('company_id', current.companyId),
         loadEmployeeDirectory(current.companyId),
       ]);
@@ -80,6 +85,49 @@ export default function DispatchScreen() {
   if (!canDispatch(membership)) return <Message title="Dispatch access required" message="Only management roles can use dispatch tools." />;
 
   return <>
+    <TextEntryModal
+      visible={Boolean(overrideRequest)}
+      title="Override availability?"
+      message="This employee is unavailable for the requested assignment. Enter the operational reason for overriding their availability."
+      placeholder="Required override reason"
+      confirmLabel="Override & assign"
+      required
+      loading={overrideBusy}
+      onCancel={() => {
+        if (!overrideBusy) setOverrideRequest(null);
+      }}
+      onConfirm={async (reason) => {
+        if (!membership || !selectedOrder || !overrideRequest || overrideBusy) return;
+
+        setOverrideBusy(true);
+        try {
+          await assignWorkOrder({
+            p_company_id: membership.companyId,
+            p_work_order_id: selectedOrder.id,
+            p_employee_id: overrideRequest.employeeId,
+            p_scheduled_start: null,
+            p_scheduled_end: null,
+            p_override_availability: true,
+            p_override_reason: reason,
+          });
+
+          const employeeName = overrideRequest.employeeName;
+          setOverrideRequest(null);
+          await load();
+          Alert.alert(
+            'Assignment created',
+            `${employeeName} was assigned with an availability override.`,
+          );
+        } catch (cause) {
+          Alert.alert(
+            'Assignment failed',
+            cause instanceof Error ? cause.message : 'Could not assign work order.',
+          );
+        } finally {
+          setOverrideBusy(false);
+        }
+      }}
+    />
     <ScrollView contentContainerStyle={styles.root} showsVerticalScrollIndicator={false}>
       <View style={styles.topbar}><Pressable onPress={() => router.back()} style={styles.back}><Icon name="arrow-back" color={colors.text} size={21} /></Pressable><View style={styles.headerCopy}><Text style={styles.eyebrow}>OPERATIONS</Text><Text style={styles.title}>Dispatch</Text></View><View style={styles.headerIcon}><Icon name="navigate-outline" color={colors.teal} size={21} /></View></View>
       {error && <Feedback tone="error" message={error} />}
@@ -103,14 +151,10 @@ export default function DispatchScreen() {
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : 'Could not assign work order.';
           if (message.toLowerCase().includes('employee_unavailable')) {
-            Alert.prompt('Unavailable employee', 'This employee is unavailable. Enter an override reason to continue.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Override', onPress: async (reason?: string) => {
-                if (!reason || !reason.trim()) { Alert.alert('Override required', 'A reason is required to override availability.'); return; }
-                try { await assignWorkOrder({ p_company_id: membership.companyId, p_work_order_id: selectedOrder.id, p_employee_id: employeeId, p_scheduled_start: null, p_scheduled_end: null, p_override_availability: true, p_override_reason: reason }); await load(); Alert.alert('Assignment created', `${employee.display_name} was assigned with an availability override.`); }
-                catch (error) { Alert.alert('Assignment failed', error instanceof Error ? error.message : 'Could not assign work order.'); }
-              } },
-            ]);
+            setOverrideRequest({
+              employeeId,
+              employeeName: employee.display_name,
+            });
             return;
           }
           Alert.alert('Assignment failed', message);

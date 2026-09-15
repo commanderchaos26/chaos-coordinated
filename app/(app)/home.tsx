@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ActionTile, Badge, Card, EmptyState, Icon, MetricCard, SectionHeader } from '../../src/components/FieldUI';
+import { TextEntryModal } from '../../src/components/TextEntryModal';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { useAuth } from '../../src/context/AuthProvider';
 import { respondToAssignment, transitionAssignment } from '../../src/lib/dispatchCommands';
@@ -31,6 +32,13 @@ export default function HomeScreen() {
   const [workOrders, setWorkOrders] = useState<WorkOrderSummary[]>([]);
   const [notificationCount, setNotificationCount] = useState(0);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [reasonModal, setReasonModal] = useState<{
+    assignmentId: string;
+    action: 'decline' | 'submit';
+    title: string;
+    message: string;
+    fallback: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,19 +111,33 @@ export default function HomeScreen() {
   };
 
   const requestReason = (assignmentId: string, action: 'decline' | 'submit', title: string, message: string, fallback: string) => {
-    Alert.prompt(title, message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: action === 'decline' ? 'Decline' : 'Submit',
-        onPress: (value?: string) => { void handleAction(assignmentId, action, value || fallback); },
-      },
-    ], 'plain-text', fallback);
+    setReasonModal({ assignmentId, action, title, message, fallback });
   };
 
   if (loading) return <LoadingScreen label="Loading your workspace…" />;
 
   return (
     <ScrollView contentContainerStyle={styles.root} showsVerticalScrollIndicator={false}>
+      <TextEntryModal
+        visible={Boolean(reasonModal)}
+        title={reasonModal?.title ?? ''}
+        message={reasonModal?.message}
+        initialValue={reasonModal?.fallback ?? ''}
+        confirmLabel={reasonModal?.action === 'decline' ? 'Decline' : 'Submit'}
+        required={reasonModal?.action === 'decline'}
+        loading={Boolean(reasonModal && processingId === reasonModal.assignmentId)}
+        onCancel={() => setReasonModal(null)}
+        onConfirm={async (value) => {
+          const current = reasonModal;
+          if (!current) return;
+          setReasonModal(null);
+          await handleAction(
+            current.assignmentId,
+            current.action,
+            value || current.fallback,
+          );
+        }}
+      />
       <View style={styles.header}>
         <View>
           <Text style={styles.eyebrow}>{membership?.companyName ?? 'CHAOS COORDINATED'}</Text>

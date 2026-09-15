@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
+import { TextEntryModal } from '../../src/components/TextEntryModal';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { respondToAssignment, transitionAssignment } from '../../src/lib/dispatchCommands';
 import { formatStatus } from '../../src/lib/employeeData';
@@ -16,6 +17,13 @@ export default function TaskDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [workOrder, setWorkOrder] = useState<any>(null);
   const [assignment, setAssignment] = useState<any>(null);
+  const [processing, setProcessing] = useState(false);
+  const [reasonModal, setReasonModal] = useState<{
+    action: 'decline' | 'submit';
+    title: string;
+    message: string;
+    fallback: string;
+  } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -24,14 +32,62 @@ export default function TaskDetailScreen() {
       const current = await loadMembership();
       setMembership(current);
       if (!current) return;
-      const workOrderId = id || assignmentId || null;
-      if (!workOrderId) return;
+      if (assignmentId) {
+        const assignmentResult = await supabase
+          .from('assignments')
+          .select('*')
+          .eq('company_id', current.companyId)
+          .eq('id', assignmentId)
+          .maybeSingle();
+
+        if (assignmentResult.error) throw assignmentResult.error;
+
+        const exactAssignment = assignmentResult.data;
+        if (!exactAssignment) {
+          setAssignment(null);
+          setWorkOrder(null);
+          return;
+        }
+
+        const workOrderResult = await supabase
+          .from('work_orders')
+          .select('*')
+          .eq('company_id', current.companyId)
+          .eq('id', exactAssignment.work_order_id)
+          .maybeSingle();
+
+        if (workOrderResult.error) throw workOrderResult.error;
+
+        setAssignment(exactAssignment);
+        setWorkOrder(workOrderResult.data);
+        return;
+      }
+
+      if (!id) {
+        setAssignment(null);
+        setWorkOrder(null);
+        return;
+      }
+
       const [workOrderResult, assignmentResult] = await Promise.all([
-        supabase.from('work_orders').select('*').eq('id', workOrderId).maybeSingle(),
-        supabase.from('assignments').select('*').eq('work_order_id', workOrderId).order('created_at', { ascending: false }).limit(1),
+        supabase
+          .from('work_orders')
+          .select('*')
+          .eq('company_id', current.companyId)
+          .eq('id', id)
+          .maybeSingle(),
+        supabase
+          .from('assignments')
+          .select('*')
+          .eq('company_id', current.companyId)
+          .eq('work_order_id', id)
+          .order('created_at', { ascending: false })
+          .limit(1),
       ]);
+
       if (workOrderResult.error) throw workOrderResult.error;
       if (assignmentResult.error) throw assignmentResult.error;
+
       setWorkOrder(workOrderResult.data);
       setAssignment((assignmentResult.data ?? [])[0] ?? null);
     } catch (cause) {
@@ -44,7 +100,8 @@ export default function TaskDetailScreen() {
   useEffect(() => { void load(); }, [id, assignmentId]);
 
   const handleAction = async (action: 'accept' | 'decline' | 'start' | 'pause' | 'resume' | 'submit', options?: { reason?: string }) => {
-    if (!membership || !assignment) return;
+    if (!membership || !assignment || processing) return;
+    setProcessing(true);
     try {
       if (action === 'accept' || action === 'decline') {
         const reason = action === 'decline' ? (options?.reason || 'No reason provided') : null;
@@ -71,17 +128,13 @@ export default function TaskDetailScreen() {
       Alert.alert('Update sent', 'The assignment status was updated.');
     } catch (cause) {
       Alert.alert('Update failed', cause instanceof Error ? cause.message : 'Could not update assignment.');
+    } finally {
+      setProcessing(false);
     }
   };
 
   const requestReason = (title: string, message: string, fallback: string, action: 'decline' | 'submit') => {
-    Alert.prompt(title, message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: action === 'decline' ? 'Decline' : 'Submit',
-        onPress: (value?: string) => { void handleAction(action, { reason: value || fallback }); },
-      },
-    ], 'plain-text', fallback);
+    setReasonModal({ title, message, fallback, action });
   };
 
   if (loading) return <LoadingScreen label="Loading task..." />;
@@ -91,6 +144,24 @@ export default function TaskDetailScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.root} showsVerticalScrollIndicator={false}>
+      <TextEntryModal
+        visible={Boolean(reasonModal)}
+        title={reasonModal?.title ?? ''}
+        message={reasonModal?.message}
+        initialValue={reasonModal?.fallback ?? ''}
+        confirmLabel={reasonModal?.action === 'decline' ? 'Decline' : 'Submit'}
+        required={reasonModal?.action === 'decline'}
+        loading={processing}
+        onCancel={() => setReasonModal(null)}
+        onConfirm={async (value) => {
+          const current = reasonModal;
+          if (!current) return;
+          setReasonModal(null);
+          await handleAction(current.action, {
+            reason: value || current.fallback,
+          });
+        }}
+      />
       <View style={styles.topbar}>
         <Pressable onPress={() => router.back()} style={styles.back}>
           <Icon name="arrow-back" color={colors.text} size={21} />

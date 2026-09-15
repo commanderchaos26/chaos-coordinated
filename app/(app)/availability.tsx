@@ -72,7 +72,35 @@ export default function AvailabilityScreen() {
   }, [membership, records, selectedEmployeeId]);
 
   const handleSubmit = async () => {
-    if (!membership || !startsAt || saving) return;
+    if (!membership || saving) return;
+
+    if (!startsAt.trim() || !endsAt.trim()) {
+      Alert.alert(
+        'Start and end required',
+        'Enter both a start date/time and an end date/time.',
+      );
+      return;
+    }
+
+    const startTime = new Date(startsAt).getTime();
+    const endTime = new Date(endsAt).getTime();
+
+    if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+      Alert.alert(
+        'Invalid date or time',
+        'Use a valid date/time for both Start and End, for example 2026-09-20T08:00:00.',
+      );
+      return;
+    }
+
+    if (endTime <= startTime) {
+      Alert.alert(
+        'Invalid time range',
+        'The end date/time must be after the start date/time.',
+      );
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -82,7 +110,7 @@ export default function AvailabilityScreen() {
         p_employee_id: employeeId,
         p_kind: kind,
         p_starts_at: startsAt,
-        p_ends_at: endsAt || null,
+        p_ends_at: endsAt,
         p_reason: reason.trim() || null,
         p_approve: canManageTeam(membership) ? true : false,
       });
@@ -172,7 +200,7 @@ export default function AvailabilityScreen() {
         <TextInput value={endsAt} onChangeText={setEndsAt} placeholder="2026-09-20T12:00:00" placeholderTextColor={colors.subtle} style={styles.input} />
         <Text style={styles.label}>Reason</Text>
         <TextInput value={reason} onChangeText={setReason} placeholder="Optional reason" placeholderTextColor={colors.subtle} multiline style={[styles.input, styles.textarea]} />
-        <View style={styles.modalActions}><Pressable disabled={saving} onPress={() => setModalOpen(false)} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable><Pressable disabled={saving || !startsAt} onPress={() => void handleSubmit()} style={[styles.submitButton, (saving || !startsAt) && styles.disabled]}><Text style={styles.submitText}>{saving ? 'Saving...' : 'Submit'}</Text></Pressable></View>
+        <View style={styles.modalActions}><Pressable disabled={saving} onPress={() => setModalOpen(false)} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable><Pressable disabled={saving || !startsAt.trim() || !endsAt.trim()} onPress={() => void handleSubmit()} style={[styles.submitButton, (saving || !startsAt.trim() || !endsAt.trim()) && styles.disabled]}><Text style={styles.submitText}>{saving ? 'Saving...' : 'Submit'}</Text></Pressable></View>
       </View></View>
     </Modal>
   </>;
