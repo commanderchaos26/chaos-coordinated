@@ -18,7 +18,7 @@ export default function AppLayout() {
       <Tabs.Screen name="skills" options={{ href: null, title: 'Skills' }} />
       <Tabs.Screen name="departments" options={{ href: null, title: 'Departments' }} />
       <Tabs.Screen name="crews" options={{ href: null, title: 'Crews' }} />
-      <Tabs.Screen name="availability" options={{ href: null, title: 'Availability' }} />
+      <Tabs.Screen name="availability" options={{ href: null, title: 'Schedule & Exceptions' }} />
       <Tabs.Screen name="dispatch" options={{ href: null, title: 'Dispatch' }} />
       <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen name="task-detail" options={{ href: null, title: 'Task Detail' }} />
