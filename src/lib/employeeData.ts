@@ -3,11 +3,11 @@ import { supabase } from './supabase';
 export type Employee = { id: string; company_id: string; employee_number: string | null; display_name: string; preferred_phone: string | null; primary_department_id: string | null; employment_status: string; floater_eligible: boolean; start_date: string | null; end_date: string | null };
 export type EmployeeLink = { employee_id: string; intended_email: string | null; status: string | null };
 export type EmployeeRole = { employee_id: string; role: string };
-export type Department = { id: string; name: string; code: string | null };
+export type Department = { id: string; name: string; code: string | null; active?: boolean };
 export type EmployeeDepartment = { employee_id: string; department_id: string; is_primary: boolean; active: boolean };
 export type Skill = { id: string; name: string; category: string | null; description: string | null; active: boolean };
 export type EmployeeSkill = { id: string; employee_id: string; skill_id: string; proficiency: string | null; verification_status: string | null; verified_by: string | null; verified_at: string | null; expires_at: string | null; notes: string | null };
-export type Crew = { id: string; name: string; lead_employee_id: string | null };
+export type Crew = { id: string; name: string; notes?: string | null; lead_employee_id: string | null; property_id?: string | null; active?: boolean };
 export type CrewMember = { crew_id: string; employee_id: string; member_role: string | null; active: boolean };
 export type AvailabilityPeriod = { employee_id: string; kind: string; starts_at: string; ends_at: string | null; reason: string | null };
 
@@ -34,6 +34,25 @@ async function loadCompanyRows(companyId: string) {
 }
 
 export function loadEmployeeDirectory(companyId: string) { return loadCompanyRows(companyId); }
+
+export async function loadOrganizationData(companyId: string) {
+  const [departments, crews, employees, employeeDepartments, crewMembers] = await Promise.all([
+    supabase.from('departments').select('id,name,code,active').eq('company_id', companyId).order('name'),
+    supabase.from('crews').select('id,name,notes,lead_employee_id,property_id,active').eq('company_id', companyId).order('name'),
+    supabase.from('employees').select('id,display_name,employee_number,employment_status').eq('company_id', companyId).order('display_name'),
+    supabase.from('employee_departments').select('employee_id,department_id,is_primary,active'),
+    supabase.from('crew_members').select('crew_id,employee_id,member_role,active'),
+  ]);
+  const failure = [departments, crews, employees, employeeDepartments, crewMembers].find((result) => result.error);
+  if (failure?.error) throw failure.error;
+  return {
+    departments: (departments.data ?? []) as Department[],
+    crews: (crews.data ?? []) as Crew[],
+    employees: (employees.data ?? []) as Pick<Employee, 'id' | 'display_name' | 'employee_number' | 'employment_status'>[],
+    employeeDepartments: (employeeDepartments.data ?? []) as EmployeeDepartment[],
+    crewMembers: (crewMembers.data ?? []) as CrewMember[],
+  };
+}
 
 export async function loadEmployeeDetail(companyId: string, employeeId: string) {
   const data = await loadCompanyRows(companyId);
