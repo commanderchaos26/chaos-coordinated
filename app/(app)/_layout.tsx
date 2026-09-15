@@ -13,6 +13,9 @@ export default function AppLayout() {
       <Tabs.Screen name="turnovers" options={{ title: 'Turnovers', tabBarIcon: ({ color, size }) => <Ionicons name="sync-outline" color={color} size={size} /> }} />
       <Tabs.Screen name="management" options={{ title: 'Management', tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" color={color} size={size} /> }} />
       <Tabs.Screen name="invite-employee" options={{ href: null, title: 'Invite Employee' }} />
+      <Tabs.Screen name="employees" options={{ href: null, title: 'Employees' }} />
+      <Tabs.Screen name="employee-detail" options={{ href: null, title: 'Employee Detail' }} />
+      <Tabs.Screen name="skills" options={{ href: null, title: 'Skills' }} />
     </Tabs>
   );
 }
