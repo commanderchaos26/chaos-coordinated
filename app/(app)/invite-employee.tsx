@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import * as Crypto from 'expo-crypto';
 import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../../src/components/FieldUI';
@@ -28,7 +29,7 @@ export default function InviteEmployeeScreen() {
             display_name: name.trim(),
             email: email.trim().toLowerCase(),
             roles: ['technician'],
-            idempotency_key: crypto.randomUUID(),
+            idempotency_key: Crypto.randomUUID(),
           },
         }),
         new Promise<never>((_, reject) => {
