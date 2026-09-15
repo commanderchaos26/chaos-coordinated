@@ -22,6 +22,8 @@ export default function AppLayout() {
       <Tabs.Screen name="dispatch" options={{ href: null, title: 'Dispatch' }} />
       <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen name="task-detail" options={{ href: null, title: 'Task Detail' }} />
+      <Tabs.Screen name="properties" options={{ href: null, title: 'Properties & Geofences' }} />
+      <Tabs.Screen name="new-work-order" options={{ href: null, title: 'New Work Order' }} />
     </Tabs>
   );
 }
