@@ -10,6 +10,7 @@ export type EmployeeSkill = { id: string; employee_id: string; skill_id: string;
 export type Crew = { id: string; name: string; notes?: string | null; lead_employee_id: string | null; property_id?: string | null; active?: boolean };
 export type CrewMember = { crew_id: string; employee_id: string; member_role: string | null; active: boolean };
 export type AvailabilityPeriod = { employee_id: string; kind: string; starts_at: string; ends_at: string | null; reason: string | null };
+export type EmployeeFeaturePermission = { employee_id: string; permission_key: string; granted_at: string; revoked_at: string | null };
 
 async function loadCompanyRows(companyId: string) {
   const results = await Promise.all([
@@ -22,14 +23,16 @@ async function loadCompanyRows(companyId: string) {
     supabase.from('employee_skills').select('id,employee_id,skill_id,proficiency,verification_status,verified_by,verified_at,expires_at,notes').eq('company_id', companyId),
     supabase.from('crews').select('id,name,lead_employee_id').eq('company_id', companyId).eq('active', true).order('name'),
     supabase.from('crew_members').select('crew_id,employee_id,member_role,active').eq('active', true),
+    supabase.from('employee_feature_permissions').select('employee_id,permission_key,granted_at,revoked_at').eq('company_id', companyId).is('revoked_at', null),
   ]);
   const failure = results.find((result) => result.error);
   if (failure?.error) throw failure.error;
-  const [employees, links, roles, departments, employeeDepartments, skills, employeeSkills, crews, crewMembers] = results;
+  const [employees, links, roles, departments, employeeDepartments, skills, employeeSkills, crews, crewMembers, featurePermissions] = results;
   return {
     employees: (employees.data ?? []) as Employee[], links: (links.data ?? []) as EmployeeLink[], roles: (roles.data ?? []) as EmployeeRole[],
     departments: (departments.data ?? []) as Department[], employeeDepartments: (employeeDepartments.data ?? []) as EmployeeDepartment[],
     skills: (skills.data ?? []) as Skill[], employeeSkills: (employeeSkills.data ?? []) as EmployeeSkill[], crews: (crews.data ?? []) as Crew[], crewMembers: (crewMembers.data ?? []) as CrewMember[],
+    featurePermissions: (featurePermissions.data ?? []) as EmployeeFeaturePermission[],
   };
 }
 
