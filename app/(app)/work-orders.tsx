@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { Badge, Card, EmptyState, Icon, SectionHeader } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { formatStatus } from '../../src/lib/employeeData';
+import { loadMyFeaturePermissions } from '../../src/lib/featurePermissionCommands';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
 import { colors, spacing, typography } from '../../src/theme';
@@ -31,10 +32,10 @@ type Row = WorkOrderRow & {
 };
 
 const canCreate = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner','operations_manager','supervisor','dispatcher','crew_lead'].includes(role)));
-const canWalk = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner','operations_manager','supervisor','dispatcher','crew_lead','technician'].includes(role)));
 
 export default function WorkOrdersScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
+  const [aiWalkthroughAllowed, setAiWalkthroughAllowed] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -46,7 +47,11 @@ export default function WorkOrdersScreen() {
     try {
       const current = await loadMembership();
       setMembership(current);
+      setAiWalkthroughAllowed(false);
       if (!current) return;
+
+      const permissions = await loadMyFeaturePermissions(current.companyId, current.employeeId);
+      setAiWalkthroughAllowed(permissions.has('ai_walkthrough'));
 
       const { data, error: orderError } = await supabase
         .from('work_orders')
@@ -113,7 +118,7 @@ export default function WorkOrdersScreen() {
 
   return <ScrollView contentContainerStyle={styles.root} showsVerticalScrollIndicator={false}>
     <View style={styles.header}><View><Text style={styles.eyebrow}>FIELD QUEUE</Text><Text style={styles.heading}>Work orders</Text></View><View style={styles.count}><Text style={styles.countValue}>{rows.length}</Text><Text style={styles.countLabel}>TOTAL</Text></View></View>
-    {canWalk(membership) ? <Pressable onPress={() => router.push('/(app)/ai-walkthrough' as never)} style={styles.aiCreate}><View style={styles.aiIcon}><Icon name="mic" color={colors.teal} size={22}/></View><View style={styles.aiCopy}><Text style={styles.aiEyebrow}>PRIMARY WORKFLOW</Text><Text style={styles.aiTitle}>Start AI Walkthrough</Text><Text style={styles.aiText}>Walk the unit, describe the work, and turn observations into departmental jobs.</Text></View><Icon name="arrow-forward" color={colors.teal} size={20}/></Pressable> : null}
+    {aiWalkthroughAllowed ? <Pressable onPress={() => router.push('/(app)/ai-walkthrough' as never)} style={styles.aiCreate}><View style={styles.aiIcon}><Icon name="mic" color={colors.teal} size={22}/></View><View style={styles.aiCopy}><Text style={styles.aiEyebrow}>AUTHORIZED AI TOOL</Text><Text style={styles.aiTitle}>Start AI Walkthrough</Text><Text style={styles.aiText}>Walk the unit, describe the work, and turn observations into departmental jobs.</Text></View><Icon name="arrow-forward" color={colors.teal} size={20}/></Pressable> : null}
     {canCreate(membership) ? <Pressable onPress={() => router.push('/(app)/new-work-order' as never)} style={styles.create}><Icon name="add" color={colors.background} size={20}/><Text style={styles.createText}>New manual work order</Text></Pressable> : null}
     <View style={styles.search}><Icon name="search-outline" color={colors.subtle} size={19} /><TextInput placeholder="Search work orders" placeholderTextColor={colors.subtle} value={query} onChangeText={setQuery} style={styles.searchInput} /></View>
     {error ? <Card style={styles.errorCard}><Text style={styles.errorText}>{error}</Text></Card> : null}
@@ -125,7 +130,7 @@ export default function WorkOrdersScreen() {
       {item.department_name ? <Text style={styles.department}>{item.department_name}</Text> : null}
       <View style={styles.metaLine}><Icon name="person-outline" size={15} color={colors.subtle} /><Text style={styles.metaText}>{item.employee_name ? `Assigned to ${item.employee_name}` : item.assignment_status ? `Assignment: ${formatStatus(item.assignment_status)}` : 'Unassigned'}</Text></View>
       <View style={styles.metaLine}><Icon name="time-outline" size={15} color={colors.subtle} /><Text style={styles.metaText}>{item.due_at ? `Due ${new Date(item.due_at).toLocaleString()}` : 'Due date not set'}</Text></View>
-    </Card></Pressable>) : <EmptyState icon="construct-outline" title="Queue is clear" message={canCreate(membership) ? 'Use AI Walkthrough for a unit turn, or create a manual work order for an exception.' : 'New work orders will appear here when assigned.'} />}
+    </Card></Pressable>) : <EmptyState icon="construct-outline" title="Queue is clear" message={canCreate(membership) ? 'Use AI Walkthrough if your profile is authorized, or create a manual work order for an exception.' : 'New work orders will appear here when assigned.'} />}
   </ScrollView>;
 }
 
