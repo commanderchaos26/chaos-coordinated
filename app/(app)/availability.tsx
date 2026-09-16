@@ -44,6 +44,7 @@ type ScheduleException = {
 };
 
 type EmployeeOption = { id: string; display_name: string; employment_status: string };
+type WorkHourDraft = { start: string; end: string };
 
 const weekdays = [
   { value: 0, short: 'Sun', long: 'Sunday' },
@@ -64,6 +65,7 @@ const today = () => { const value = new Date(); return `${value.getFullYear()}-$
 export default function AvailabilityScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
   const [scheduleDays, setScheduleDays] = useState<ScheduleDay[]>([]);
+  const [workHourDrafts, setWorkHourDrafts] = useState<Record<number, WorkHourDraft>>({});
   const [exceptions, setExceptions] = useState<ScheduleException[]>([]);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -102,7 +104,9 @@ export default function AvailabilityScreen() {
       if (daysResult.error) throw daysResult.error;
       if (exceptionsResult.error) throw exceptionsResult.error;
       if (employeesResult.error) throw employeesResult.error;
-      setScheduleDays((daysResult.data ?? []) as ScheduleDay[]);
+      const days = (daysResult.data ?? []) as ScheduleDay[];
+      setScheduleDays(days);
+      setWorkHourDrafts(Object.fromEntries(days.map((day) => [day.weekday, { start: day.start_time?.slice(0, 5) ?? '', end: day.end_time?.slice(0, 5) ?? '' }])));
       setExceptions((exceptionsResult.data ?? []) as ScheduleException[]);
       setEmployees((employeesResult.data ?? []) as EmployeeOption[]);
     } catch (cause) {
@@ -211,11 +215,21 @@ export default function AvailabilityScreen() {
     }
   };
 
-  const updateDefaultTime = async (day: ScheduleDay, field: 'start' | 'end', value: string) => {
+  const setWorkHourDraft = (weekday: number, field: 'start' | 'end', value: string) => {
+    setWorkHourDrafts((current) => ({
+      ...current,
+      [weekday]: { start: current[weekday]?.start ?? '', end: current[weekday]?.end ?? '', [field]: value },
+    }));
+  };
+
+  const saveDefaultHours = async (day: ScheduleDay) => {
     if (!membership || !canEditCompanySchedule(membership) || saving) return;
-    const nextStart = field === 'start' ? value || null : day.start_time;
-    const nextEnd = field === 'end' ? value || null : day.end_time;
-    if (nextStart && nextEnd && nextEnd <= nextStart) {
+    const draft = workHourDrafts[day.weekday] ?? { start: '', end: '' };
+    if ((draft.start && !draft.end) || (!draft.start && draft.end)) {
+      Alert.alert('Both times required', 'Choose both a start time and an end time, or clear both to leave the workday unrestricted.');
+      return;
+    }
+    if (draft.start && draft.end && draft.end <= draft.start) {
       Alert.alert('Invalid work hours', 'The end time must be later than the start time.');
       return;
     }
@@ -225,12 +239,25 @@ export default function AvailabilityScreen() {
         p_company_id: membership.companyId,
         p_weekday: day.weekday,
         p_is_workday: true,
-        p_start_time: nextStart,
-        p_end_time: nextEnd,
+        p_start_time: draft.start || null,
+        p_end_time: draft.end || null,
       });
       await load();
     } catch (cause) {
       Alert.alert('Could not update work hours', cause instanceof Error ? cause.message : 'Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearDefaultHours = async (day: ScheduleDay) => {
+    if (!membership || !canEditCompanySchedule(membership) || saving) return;
+    setSaving(true);
+    try {
+      await setCompanyScheduleDay({ p_company_id: membership.companyId, p_weekday: day.weekday, p_is_workday: true, p_start_time: null, p_end_time: null });
+      await load();
+    } catch (cause) {
+      Alert.alert('Could not clear work hours', cause instanceof Error ? cause.message : 'Try again.');
     } finally {
       setSaving(false);
     }
@@ -303,12 +330,17 @@ export default function AvailabilityScreen() {
       {activeScheduleDays.length ? <View style={styles.hoursList}>
         {activeScheduleDays.map((day) => {
           const label = weekdays.find((item) => item.value === day.weekday)?.long ?? 'Workday';
+          const draft = workHourDrafts[day.weekday] ?? { start: day.start_time?.slice(0,5) ?? '', end: day.end_time?.slice(0,5) ?? '' };
+          const changed = draft.start !== (day.start_time?.slice(0,5) ?? '') || draft.end !== (day.end_time?.slice(0,5) ?? '');
           return <Card key={day.weekday} style={styles.hoursCard}>
             <View style={styles.hoursHeader}><Text style={styles.hoursDay}>{label}</Text>{day.start_time && day.end_time ? <Text style={styles.hoursSummary}>{formatTime(day.start_time)}–{formatTime(day.end_time)}</Text> : <Text style={styles.hoursSummary}>Hours not limited</Text>}</View>
-            {canEditCompanySchedule(membership) ? <View style={styles.twoColumns}>
-              <View style={styles.half}><DateTimePickerField label="START" mode="time" value={day.start_time?.slice(0,5) ?? ''} onChange={(value) => void updateDefaultTime(day, 'start', value)} placeholder="Set start" optional disabled={saving} /></View>
-              <View style={styles.half}><DateTimePickerField label="END" mode="time" value={day.end_time?.slice(0,5) ?? ''} onChange={(value) => void updateDefaultTime(day, 'end', value)} placeholder="Set end" optional disabled={saving} /></View>
-            </View> : null}
+            {canEditCompanySchedule(membership) ? <>
+              <View style={styles.twoColumns}>
+                <View style={styles.half}><DateTimePickerField label="START" mode="time" value={draft.start} onChange={(value) => setWorkHourDraft(day.weekday, 'start', value)} placeholder="Set start" optional disabled={saving} /></View>
+                <View style={styles.half}><DateTimePickerField label="END" mode="time" value={draft.end} onChange={(value) => setWorkHourDraft(day.weekday, 'end', value)} placeholder="Set end" optional disabled={saving} /></View>
+              </View>
+              <View style={styles.hourActions}><Pressable disabled={saving || (!draft.start && !draft.end && !day.start_time && !day.end_time)} onPress={() => void clearDefaultHours(day)} style={styles.smallAction}><Text style={styles.smallActionText}>No time limit</Text></Pressable><Pressable disabled={saving || !changed} onPress={() => void saveDefaultHours(day)} style={[styles.saveHours, (!changed || saving) && styles.disabled]}><Text style={styles.saveHoursText}>Save hours</Text></Pressable></View>
+            </> : null}
           </Card>;
         })}
       </View> : null}
@@ -413,6 +445,11 @@ const styles = StyleSheet.create({
   hoursSummary: { color: colors.muted, fontSize: 12, fontWeight: '700' },
   twoColumns: { flexDirection: 'row', gap: spacing.sm },
   half: { flex: 1, minWidth: 0 },
+  hourActions: { flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' },
+  smallAction: { alignItems: 'center', borderColor: colors.border, borderRadius: 10, borderWidth: 1, justifyContent: 'center', minHeight: 42, paddingHorizontal: spacing.md },
+  smallActionText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
+  saveHours: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 10, justifyContent: 'center', minHeight: 42, paddingHorizontal: spacing.lg },
+  saveHoursText: { color: colors.background, fontSize: 12, fontWeight: '900' },
   filterRow: { gap: spacing.sm, marginTop: spacing.sm },
   label: { color: colors.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.7, textTransform: 'uppercase' },
   selectorWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
