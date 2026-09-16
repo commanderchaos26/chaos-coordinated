@@ -10,6 +10,25 @@ function messageFrom(value: unknown) {
   return 'The AI walkthrough request could not be completed.';
 }
 
+async function messageFromFunctionError(value: unknown) {
+  if (value && typeof value === 'object' && 'context' in value) {
+    const context = (value as { context?: unknown }).context;
+    if (context instanceof Response) {
+      try {
+        const payload = await context.clone().json() as { message?: unknown; error?: unknown };
+        if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message.trim();
+        if (typeof payload?.error === 'string' && payload.error.trim()) return payload.error.trim();
+      } catch {
+        try {
+          const text = await context.clone().text();
+          if (text.trim()) return text.trim();
+        } catch { /* use generic error below */ }
+      }
+    }
+  }
+  return messageFrom(value);
+}
+
 function translateKnownError(message: string) {
   const normalized = message.toLowerCase();
   if (normalized.includes('insufficient_permission') || normalized.includes('ai_walkthrough_permission_required')) return 'AI Walkthrough access has not been granted to this employee profile.';
@@ -23,6 +42,7 @@ function translateKnownError(message: string) {
   if (normalized.includes('transcript_text_required')) return 'Say or enter an observation before saving it.';
   if (normalized.includes('no_walkthrough_observations')) return 'Add at least one observation before finishing the walkthrough.';
   if (normalized.includes('openai_not_configured')) return 'The AI service key has not been connected to Chaos Coordinated yet.';
+  if (normalized.includes('account is not active') || normalized.includes('billing details') || normalized.includes('insufficient_quota') || normalized.includes('credit_balance_exhausted')) return 'The OpenAI API account is not active for paid API usage. Check the API billing method or credit balance, then try again.';
   return message;
 }
 
@@ -145,7 +165,7 @@ export async function finalizeAiWalkthrough(params: {
         timeout = setTimeout(() => reject(new Error('AI interpretation is taking too long. Please try again.')), AI_FINALIZE_TIMEOUT_MS);
       }),
     ]);
-    if (response.error) throw response.error;
+    if (response.error) throw new Error(translateKnownError(await messageFromFunctionError(response.error)));
     const data = response.data as AiWalkthroughFinalizeResult & { error?: string; message?: string };
     if (data?.error) throw new Error(data.message || data.error);
     return data;
