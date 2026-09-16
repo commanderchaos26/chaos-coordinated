@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
+import { DateTimePickerField } from '../../src/components/DateTimePickerField';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { formatStatus } from '../../src/lib/employeeData';
 import { loadMembership } from '../../src/lib/membership';
@@ -57,7 +58,8 @@ const weekdays = [
 const exceptionKinds: ScheduleExceptionKind[] = ['unavailable', 'pto', 'sick', 'training', 'restricted'];
 const canManageTeam = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner', 'operations_manager', 'supervisor', 'dispatcher'].includes(role)));
 const canEditCompanySchedule = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner', 'operations_manager'].includes(role)));
-const today = () => new Date().toISOString().slice(0, 10);
+const pad = (value: number) => String(value).padStart(2, '0');
+const today = () => { const value = new Date(); return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`; };
 
 export default function AvailabilityScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
@@ -114,10 +116,8 @@ export default function AvailabilityScreen() {
 
   const effectiveEmployeeId = canManageTeam(membership) ? selectedEmployeeId || membership?.employeeId || '' : membership?.employeeId || '';
   const employeeName = employees.find((item) => item.id === effectiveEmployeeId)?.display_name ?? 'Employee';
-  const visibleExceptions = useMemo(
-    () => exceptions.filter((item) => item.employee_id === effectiveEmployeeId),
-    [effectiveEmployeeId, exceptions],
-  );
+  const visibleExceptions = useMemo(() => exceptions.filter((item) => item.employee_id === effectiveEmployeeId), [effectiveEmployeeId, exceptions]);
+  const activeScheduleDays = useMemo(() => scheduleDays.filter((item) => item.is_workday), [scheduleDays]);
 
   const defaultSummary = useMemo(() => {
     const active = weekdays.filter((day) => scheduleDays.find((row) => row.weekday === day.value)?.is_workday);
@@ -145,17 +145,21 @@ export default function AvailabilityScreen() {
     if (recurrence === 'one_off') {
       const start = new Date(startsAt).getTime();
       const end = new Date(endsAt).getTime();
-      if (!startsAt.trim() || !endsAt.trim() || Number.isNaN(start) || Number.isNaN(end) || end <= start) {
-        Alert.alert('Valid start and end required', 'Enter a valid start and end date/time for the schedule exception.');
+      if (!startsAt || !endsAt || Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+        Alert.alert('Valid start and end required', 'Choose a start date/time and an end date/time. The end must be after the start.');
         return;
       }
     } else {
-      if (!effectiveFrom.trim()) {
-        Alert.alert('Start date required', 'Enter the date when this weekly exception should begin.');
+      if (!effectiveFrom) {
+        Alert.alert('Start date required', 'Choose the date when this weekly exception should begin.');
         return;
       }
-      if ((startTime.trim() && !endTime.trim()) || (!startTime.trim() && endTime.trim())) {
-        Alert.alert('Both times required', 'For a partial-day weekly exception, enter both a start time and end time. Leave both blank for the whole day.');
+      if ((startTime && !endTime) || (!startTime && endTime)) {
+        Alert.alert('Both times required', 'For a partial-day weekly exception, choose both a start time and end time. Leave both blank for the whole day.');
+        return;
+      }
+      if (startTime && endTime && endTime <= startTime) {
+        Alert.alert('End time must be later', 'Choose an end time later than the start time.');
         return;
       }
     }
@@ -170,10 +174,10 @@ export default function AvailabilityScreen() {
         p_starts_at: recurrence === 'one_off' ? startsAt : null,
         p_ends_at: recurrence === 'one_off' ? endsAt : null,
         p_weekday: recurrence === 'weekly' ? weeklyDay : null,
-        p_start_time: recurrence === 'weekly' && startTime.trim() ? startTime.trim() : null,
-        p_end_time: recurrence === 'weekly' && endTime.trim() ? endTime.trim() : null,
+        p_start_time: recurrence === 'weekly' && startTime ? startTime : null,
+        p_end_time: recurrence === 'weekly' && endTime ? endTime : null,
         p_effective_from: recurrence === 'weekly' ? effectiveFrom : null,
-        p_effective_to: recurrence === 'weekly' && effectiveTo.trim() ? effectiveTo.trim() : null,
+        p_effective_to: recurrence === 'weekly' && effectiveTo ? effectiveTo : null,
         p_note: note.trim() || null,
         p_approve: canManageTeam(membership),
       });
@@ -202,6 +206,31 @@ export default function AvailabilityScreen() {
       await load();
     } catch (cause) {
       Alert.alert('Could not update workweek', cause instanceof Error ? cause.message : 'Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateDefaultTime = async (day: ScheduleDay, field: 'start' | 'end', value: string) => {
+    if (!membership || !canEditCompanySchedule(membership) || saving) return;
+    const nextStart = field === 'start' ? value || null : day.start_time;
+    const nextEnd = field === 'end' ? value || null : day.end_time;
+    if (nextStart && nextEnd && nextEnd <= nextStart) {
+      Alert.alert('Invalid work hours', 'The end time must be later than the start time.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await setCompanyScheduleDay({
+        p_company_id: membership.companyId,
+        p_weekday: day.weekday,
+        p_is_workday: true,
+        p_start_time: nextStart,
+        p_end_time: nextEnd,
+      });
+      await load();
+    } catch (cause) {
+      Alert.alert('Could not update work hours', cause instanceof Error ? cause.message : 'Try again.');
     } finally {
       setSaving(false);
     }
@@ -255,7 +284,7 @@ export default function AvailabilityScreen() {
 
       <Card style={styles.explainer}>
         <View style={styles.explainerTop}><Icon name="checkmark-circle-outline" color={colors.teal} size={23} /><Text style={styles.explainerTitle}>Available by default</Text></View>
-        <Text style={styles.explainerText}>Every active employee is automatically treated as available on the company workdays. No employee setup is required unless their schedule is different.</Text>
+        <Text style={styles.explainerText}>Every active employee is automatically treated as available on company workdays. Use the calendar and clock controls only when the normal schedule needs to change.</Text>
       </Card>
 
       {error && <Feedback message={error} />}
@@ -269,7 +298,20 @@ export default function AvailabilityScreen() {
           </Pressable>;
         })}
       </View>
-      {canEditCompanySchedule(membership) && <Text style={styles.helper}>Tap a day to add or remove it from the default workweek. Employees inherit this schedule automatically.</Text>}
+      {canEditCompanySchedule(membership) && <Text style={styles.helper}>Tap a day to turn it on or off. Set work hours below with the clock picker instead of typing times.</Text>}
+
+      {activeScheduleDays.length ? <View style={styles.hoursList}>
+        {activeScheduleDays.map((day) => {
+          const label = weekdays.find((item) => item.value === day.weekday)?.long ?? 'Workday';
+          return <Card key={day.weekday} style={styles.hoursCard}>
+            <View style={styles.hoursHeader}><Text style={styles.hoursDay}>{label}</Text>{day.start_time && day.end_time ? <Text style={styles.hoursSummary}>{formatTime(day.start_time)}–{formatTime(day.end_time)}</Text> : <Text style={styles.hoursSummary}>Hours not limited</Text>}</View>
+            {canEditCompanySchedule(membership) ? <View style={styles.twoColumns}>
+              <View style={styles.half}><DateTimePickerField label="START" mode="time" value={day.start_time?.slice(0,5) ?? ''} onChange={(value) => void updateDefaultTime(day, 'start', value)} placeholder="Set start" optional disabled={saving} /></View>
+              <View style={styles.half}><DateTimePickerField label="END" mode="time" value={day.end_time?.slice(0,5) ?? ''} onChange={(value) => void updateDefaultTime(day, 'end', value)} placeholder="Set end" optional disabled={saving} /></View>
+            </View> : null}
+          </Card>;
+        })}
+      </View> : null}
 
       {canManageTeam(membership) && <View style={styles.filterRow}>
         <Text style={styles.label}>Employee</Text>
@@ -290,29 +332,41 @@ export default function AvailabilityScreen() {
     <Modal animationType="slide" transparent visible={modalOpen} onRequestClose={() => !saving && setModalOpen(false)}>
       <View style={styles.modalBackdrop}><View style={styles.modal}>
         <View style={styles.modalHeader}><View><Text style={styles.modalTitle}>Add schedule exception</Text><Text style={styles.modalSub}>{employeeName}</Text></View><Pressable disabled={saving} onPress={() => setModalOpen(false)}><Icon name="close" color={colors.muted} size={23} /></Pressable></View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+          <Text style={styles.label}>Reason type</Text>
+          <View style={styles.kindRow}>{exceptionKinds.map((option) => <Pressable key={option} onPress={() => setKind(option)} style={[styles.kindButton, kind === option && styles.kindButtonActive]}><Text style={[styles.kindText, kind === option && styles.kindTextActive]}>{formatStatus(option)}</Text></Pressable>)}</View>
 
-        <Text style={styles.label}>Reason type</Text>
-        <View style={styles.kindRow}>{exceptionKinds.map((option) => <Pressable key={option} onPress={() => setKind(option)} style={[styles.kindButton, kind === option && styles.kindButtonActive]}><Text style={[styles.kindText, kind === option && styles.kindTextActive]}>{formatStatus(option)}</Text></Pressable>)}</View>
+          <Text style={styles.label}>Frequency</Text>
+          <View style={styles.segment}><Pressable onPress={() => setRecurrence('one_off')} style={[styles.segmentButton, recurrence === 'one_off' && styles.segmentActive]}><Text style={[styles.segmentText, recurrence === 'one_off' && styles.segmentTextActive]}>One-time</Text></Pressable><Pressable onPress={() => setRecurrence('weekly')} style={[styles.segmentButton, recurrence === 'weekly' && styles.segmentActive]}><Text style={[styles.segmentText, recurrence === 'weekly' && styles.segmentTextActive]}>Repeats weekly</Text></Pressable></View>
 
-        <Text style={styles.label}>Frequency</Text>
-        <View style={styles.segment}><Pressable onPress={() => setRecurrence('one_off')} style={[styles.segmentButton, recurrence === 'one_off' && styles.segmentActive]}><Text style={[styles.segmentText, recurrence === 'one_off' && styles.segmentTextActive]}>One-time</Text></Pressable><Pressable onPress={() => setRecurrence('weekly')} style={[styles.segmentButton, recurrence === 'weekly' && styles.segmentActive]}><Text style={[styles.segmentText, recurrence === 'weekly' && styles.segmentTextActive]}>Repeats weekly</Text></Pressable></View>
+          {recurrence === 'one_off' ? <>
+            <DateTimePickerField label="START" value={startsAt} onChange={setStartsAt} mode="datetime" placeholder="Tap calendar, then choose time" />
+            <DateTimePickerField label="END" value={endsAt} onChange={setEndsAt} mode="datetime" placeholder="Tap calendar, then choose time" />
+          </> : <>
+            <Text style={styles.label}>Day</Text><View style={styles.dayRow}>{weekdays.map((day) => <Pressable key={day.value} onPress={() => setWeeklyDay(day.value)} style={[styles.dayChip, weeklyDay === day.value && styles.dayChipActive]}><Text style={[styles.dayChipText, weeklyDay === day.value && styles.dayChipTextActive]}>{day.short}</Text></Pressable>)}</View>
+            <DateTimePickerField label="STARTS ON" value={effectiveFrom} onChange={setEffectiveFrom} mode="date" placeholder="Choose first date" />
+            <DateTimePickerField label="ENDS ON (OPTIONAL)" value={effectiveTo} onChange={setEffectiveTo} mode="date" placeholder="No end date" optional />
+            <Text style={styles.label}>Partial-day times</Text>
+            <View style={styles.twoColumns}><View style={styles.half}><DateTimePickerField label="FROM" value={startTime} onChange={setStartTime} mode="time" placeholder="All day" optional /></View><View style={styles.half}><DateTimePickerField label="TO" value={endTime} onChange={setEndTime} mode="time" placeholder="All day" optional /></View></View>
+            <Text style={styles.helper}>Leave both times blank to omit the employee for the entire day.</Text>
+          </>}
 
-        {recurrence === 'one_off' ? <>
-          <Text style={styles.label}>Start</Text><TextInput value={startsAt} onChangeText={setStartsAt} placeholder="2026-09-20T08:00:00" placeholderTextColor={colors.subtle} style={styles.input} />
-          <Text style={styles.label}>End</Text><TextInput value={endsAt} onChangeText={setEndsAt} placeholder="2026-09-20T17:00:00" placeholderTextColor={colors.subtle} style={styles.input} />
-        </> : <>
-          <Text style={styles.label}>Day</Text><View style={styles.dayRow}>{weekdays.map((day) => <Pressable key={day.value} onPress={() => setWeeklyDay(day.value)} style={[styles.dayChip, weeklyDay === day.value && styles.dayChipActive]}><Text style={[styles.dayChipText, weeklyDay === day.value && styles.dayChipTextActive]}>{day.short}</Text></Pressable>)}</View>
-          <Text style={styles.label}>Starts on</Text><TextInput value={effectiveFrom} onChangeText={setEffectiveFrom} placeholder="2026-09-20" placeholderTextColor={colors.subtle} style={styles.input} />
-          <Text style={styles.label}>Ends on</Text><TextInput value={effectiveTo} onChangeText={setEffectiveTo} placeholder="Optional" placeholderTextColor={colors.subtle} style={styles.input} />
-          <Text style={styles.label}>Partial-day times</Text><View style={styles.twoColumns}><TextInput value={startTime} onChangeText={setStartTime} placeholder="08:00" placeholderTextColor={colors.subtle} style={[styles.input, styles.halfInput]} /><TextInput value={endTime} onChangeText={setEndTime} placeholder="12:00" placeholderTextColor={colors.subtle} style={[styles.input, styles.halfInput]} /></View><Text style={styles.helper}>Leave both times blank to omit the employee for the entire day.</Text>
-        </>}
-
-        <Text style={styles.label}>Note</Text><TextInput value={note} onChangeText={setNote} placeholder="Vacation, appointment, class, restriction..." placeholderTextColor={colors.subtle} multiline style={[styles.input, styles.textarea]} />
-        <Text style={styles.helper}>The note explains why the employee is omitted. Dispatch uses the structured dates and times above, not guesses from free-form text.</Text>
-        <View style={styles.modalActions}><Pressable disabled={saving} onPress={() => setModalOpen(false)} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable><Pressable disabled={saving} onPress={() => void saveException()} style={[styles.submitButton, saving && styles.disabled]}><Text style={styles.submitText}>{saving ? 'Saving...' : 'Save exception'}</Text></Pressable></View>
+          <Text style={styles.label}>Note</Text><TextInput value={note} onChangeText={setNote} placeholder="Vacation, appointment, class, restriction..." placeholderTextColor={colors.subtle} multiline style={[styles.input, styles.textarea]} />
+          <Text style={styles.helper}>The note explains why the employee is omitted. Dispatch uses the selected dates and times above, not guesses from free-form text.</Text>
+          <View style={styles.modalActions}><Pressable disabled={saving} onPress={() => setModalOpen(false)} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable><Pressable disabled={saving} onPress={() => void saveException()} style={[styles.submitButton, saving && styles.disabled]}><Text style={styles.submitText}>{saving ? 'Saving...' : 'Save exception'}</Text></Pressable></View>
+        </ScrollView>
       </View></View>
     </Modal>
   </>;
+}
+
+function formatTime(value: string) {
+  const [hourText, minuteText] = value.split(':');
+  const hour = Number(hourText);
+  const minute = Number(minuteText || '0');
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 function describeException(item: ScheduleException) {
@@ -321,8 +375,10 @@ function describeException(item: ScheduleException) {
     return `${new Date(item.starts_at).toLocaleString()} → ${new Date(item.ends_at).toLocaleString()}`;
   }
   const day = weekdays.find((option) => option.value === item.weekday)?.long ?? 'Weekly';
-  const time = item.start_time && item.end_time ? `${item.start_time.slice(0, 5)}–${item.end_time.slice(0, 5)}` : 'all day';
-  const range = item.effective_to ? `${item.effective_from} through ${item.effective_to}` : `starting ${item.effective_from}`;
+  const time = item.start_time && item.end_time ? `${formatTime(item.start_time)}–${formatTime(item.end_time)}` : 'all day';
+  const start = item.effective_from ? new Date(`${item.effective_from}T12:00:00`).toLocaleDateString() : 'now';
+  const end = item.effective_to ? new Date(`${item.effective_to}T12:00:00`).toLocaleDateString() : null;
+  const range = end ? `${start} through ${end}` : `starting ${start}`;
   return `Every ${day}, ${time}, ${range}`;
 }
 
@@ -339,64 +395,70 @@ const styles = StyleSheet.create({
   headerIcon: { alignItems: 'center', backgroundColor: colors.tealDeep, borderRadius: 999, height: 44, justifyContent: 'center', width: 44 },
   explainer: { padding: spacing.md },
   explainerTop: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm },
-  explainerTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  explainerText: { color: colors.muted, fontSize: 13, lineHeight: 19, marginTop: spacing.sm },
+  explainerTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  explainerText: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: spacing.sm },
   sectionHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
-  sectionTitle: { color: colors.text, ...typography.heading },
-  sectionSub: { color: colors.muted, fontSize: 12, marginTop: 3 },
-  dayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  dayChip: { alignItems: 'center', backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 999, borderWidth: 1, minWidth: 46, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  sectionSub: { color: colors.muted, fontSize: 12, marginTop: 4 },
+  dayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  dayChip: { alignItems: 'center', backgroundColor: colors.surfaceSoft, borderColor: colors.border, borderRadius: 10, borderWidth: 1, justifyContent: 'center', minHeight: 42, minWidth: 44, paddingHorizontal: spacing.sm },
   dayChipActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal },
-  dayChipText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
+  dayChipText: { color: colors.muted, fontSize: 12, fontWeight: '900' },
   dayChipTextActive: { color: colors.teal },
-  helper: { color: colors.subtle, fontSize: 11, lineHeight: 16 },
+  helper: { color: colors.subtle, fontSize: 11, lineHeight: 17 },
+  hoursList: { gap: spacing.sm },
+  hoursCard: { gap: spacing.md, padding: spacing.md },
+  hoursHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  hoursDay: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  hoursSummary: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  twoColumns: { flexDirection: 'row', gap: spacing.sm },
+  half: { flex: 1, minWidth: 0 },
   filterRow: { gap: spacing.sm, marginTop: spacing.sm },
-  label: { color: colors.muted, fontSize: 12, fontWeight: '800', marginTop: spacing.sm, textTransform: 'uppercase' },
+  label: { color: colors.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.7, textTransform: 'uppercase' },
   selectorWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  selector: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  selector: { backgroundColor: colors.surfaceSoft, borderColor: colors.border, borderRadius: 12, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   selectorActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal },
-  selectorText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  selectorText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
   selectorTextActive: { color: colors.teal },
   addButton: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 14, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', minHeight: 52 },
-  addText: { color: colors.background, fontSize: 14, fontWeight: '800' },
-  exceptionCard: { padding: spacing.md },
+  addText: { color: colors.background, fontSize: 14, fontWeight: '900' },
+  exceptionCard: { gap: spacing.md, padding: spacing.md },
   exceptionTop: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
-  badgeRow: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm },
-  exceptionWhen: { color: colors.text, fontSize: 13, lineHeight: 19, marginTop: spacing.md },
-  note: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: spacing.sm },
-  exceptionActions: { borderTopColor: colors.border, borderTopWidth: 1, flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end', marginTop: spacing.md, paddingTop: spacing.md },
-  inlineAction: { backgroundColor: colors.tealDeep, borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  inlineActionText: { color: colors.teal, fontSize: 12, fontWeight: '800' },
+  badgeRow: { flexDirection: 'row', gap: spacing.xs },
+  exceptionWhen: { color: colors.text, fontSize: 14, fontWeight: '800', lineHeight: 20 },
+  note: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  exceptionActions: { flexDirection: 'row', gap: spacing.md },
+  inlineAction: { paddingVertical: spacing.xs },
+  inlineActionText: { color: colors.teal, fontSize: 12, fontWeight: '900' },
   failure: { alignItems: 'center', backgroundColor: colors.redDeep, borderRadius: 12, flexDirection: 'row', gap: spacing.sm, padding: spacing.md },
-  feedbackText: { color: colors.text, flex: 1, fontSize: 13 },
-  modalBackdrop: { backgroundColor: '#00000099', flex: 1, justifyContent: 'flex-end' },
-  modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%', padding: spacing.lg, paddingBottom: 36 },
-  modalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
-  modalTitle: { color: colors.text, fontSize: 18, fontWeight: '800' },
+  feedbackText: { color: colors.text, flex: 1, fontSize: 12 },
+  modalBackdrop: { backgroundColor: '#000000AA', flex: 1, justifyContent: 'flex-end' },
+  modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%', padding: spacing.lg, paddingBottom: spacing.xl },
+  modalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  modalTitle: { color: colors.text, fontSize: 19, fontWeight: '900' },
   modalSub: { color: colors.muted, fontSize: 12, marginTop: 3 },
-  kindRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  kindButton: { backgroundColor: colors.background, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  modalContent: { gap: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.sm },
+  kindRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  kindButton: { backgroundColor: colors.surfaceSoft, borderColor: colors.border, borderRadius: 10, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   kindButtonActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal },
-  kindText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
+  kindText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
   kindTextActive: { color: colors.teal },
-  segment: { flexDirection: 'row', gap: spacing.sm },
-  segmentButton: { alignItems: 'center', backgroundColor: colors.background, borderColor: colors.border, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: spacing.md },
-  segmentActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal },
+  segment: { backgroundColor: colors.surfaceSoft, borderRadius: 12, flexDirection: 'row', padding: 4 },
+  segmentButton: { alignItems: 'center', borderRadius: 9, flex: 1, justifyContent: 'center', minHeight: 42 },
+  segmentActive: { backgroundColor: colors.tealDeep },
   segmentText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
   segmentTextActive: { color: colors.teal },
-  input: { backgroundColor: colors.background, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, minHeight: 46, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  twoColumns: { flexDirection: 'row', gap: spacing.sm },
-  halfInput: { flex: 1 },
-  textarea: { minHeight: 78, textAlignVertical: 'top' },
-  modalActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
-  cancelButton: { alignItems: 'center', borderColor: colors.border, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: spacing.md },
+  input: { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, fontSize: 14, minHeight: 50, paddingHorizontal: spacing.md },
+  textarea: { minHeight: 90, paddingTop: spacing.md, textAlignVertical: 'top' },
+  modalActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  cancelButton: { alignItems: 'center', borderColor: colors.border, borderRadius: 12, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 50 },
   cancelText: { color: colors.muted, fontWeight: '800' },
-  submitButton: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 12, flex: 1.4, paddingVertical: spacing.md },
-  submitText: { color: colors.background, fontWeight: '800' },
+  submitButton: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 12, flex: 1.5, justifyContent: 'center', minHeight: 50 },
+  submitText: { color: colors.background, fontWeight: '900' },
   disabled: { opacity: 0.5 },
   message: { alignItems: 'center', backgroundColor: colors.background, flex: 1, justifyContent: 'center', padding: spacing.xl },
-  messageTitle: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: spacing.md },
-  messageText: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: spacing.sm, textAlign: 'center' },
-  backButton: { backgroundColor: colors.teal, borderRadius: 12, marginTop: spacing.lg, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
-  backText: { color: colors.background, fontWeight: '800' },
+  messageTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginTop: spacing.md },
+  messageText: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: spacing.sm, textAlign: 'center' },
+  backButton: { backgroundColor: colors.teal, borderRadius: 12, marginTop: spacing.lg, minWidth: 120, padding: spacing.md },
+  backText: { color: colors.background, fontWeight: '900', textAlign: 'center' },
 });
