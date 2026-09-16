@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
+import * as Crypto from 'expo-crypto';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Card, EmptyState, Icon } from '../../src/components/FieldUI';
+import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
-import { appendAiWalkthroughChunk, startAiWalkthrough, type AiWalkthroughSession } from '../../src/lib/aiWalkthroughCommands';
+import { appendAiWalkthroughChunk, finalizeAiWalkthrough, startAiWalkthrough, type AiWalkthroughFinalizeResult, type AiWalkthroughSession } from '../../src/lib/aiWalkthroughCommands';
+import { loadMyFeaturePermissions } from '../../src/lib/featurePermissionCommands';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
 import { colors, spacing, typography } from '../../src/theme';
@@ -15,10 +17,9 @@ type Unit = { id: string; building_id: string; unit_number: string };
 type WorkSite = { id: string; property_id: string; name: string };
 type Chunk = { id: string; sequence_no: number; transcript_text: string; source: string; captured_at: string };
 
-const canWalk = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner','operations_manager','supervisor','dispatcher','crew_lead','technician'].includes(role)));
-
 export default function AiWalkthroughScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
+  const [authorized, setAuthorized] = useState(false);
   const [properties, setProperties] = useState<Property[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -29,6 +30,8 @@ export default function AiWalkthroughScreen() {
   const [session, setSession] = useState<AiWalkthroughSession | null>(null);
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [observation, setObservation] = useState('');
+  const [finalizationKey, setFinalizationKey] = useState('');
+  const [result, setResult] = useState<AiWalkthroughFinalizeResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,13 +44,16 @@ export default function AiWalkthroughScreen() {
         const current = await loadMembership();
         setMembership(current);
         if (!current) return;
+        const permissions = await loadMyFeaturePermissions(current.companyId, current.employeeId);
+        setAuthorized(permissions.has('ai_walkthrough'));
+        if (!permissions.has('ai_walkthrough')) return;
         const [p, b, u, w] = await Promise.all([
           supabase.from('properties').select('id,name').eq('company_id', current.companyId).order('name'),
           supabase.from('buildings').select('id,property_id,name').eq('company_id', current.companyId).order('name'),
           supabase.from('units').select('id,building_id,unit_number').eq('company_id', current.companyId).order('unit_number'),
           supabase.from('work_sites').select('id,property_id,name').eq('company_id', current.companyId).order('name'),
         ]);
-        const failure = [p,b,u,w].find((result) => result.error);
+        const failure = [p,b,u,w].find((item) => item.error);
         if (failure?.error) throw failure.error;
         setProperties((p.data ?? []) as Property[]);
         setBuildings((b.data ?? []) as Building[]);
@@ -73,6 +79,7 @@ export default function AiWalkthroughScreen() {
     setBuildingId('');
     setUnitId('');
   };
+
   const chooseBuilding = (id: string) => {
     setBuildingId(id);
     setUnitId('');
@@ -84,7 +91,7 @@ export default function AiWalkthroughScreen() {
     setError(null);
     try {
       const site = workSites.find((item) => item.property_id === propertyId) ?? null;
-      const result = await startAiWalkthrough({
+      const started = await startAiWalkthrough({
         p_company_id: membership.companyId,
         p_property_id: propertyId,
         p_building_id: buildingId || null,
@@ -92,8 +99,10 @@ export default function AiWalkthroughScreen() {
         p_turnover_id: null,
         p_work_site_id: site?.id ?? null,
       });
-      setSession(result.session);
+      setSession(started.session);
       setChunks([]);
+      setResult(null);
+      setFinalizationKey(Crypto.randomUUID());
     } catch (cause) {
       Alert.alert('Could not start walkthrough', cause instanceof Error ? cause.message : 'Try again.');
     } finally {
@@ -102,12 +111,12 @@ export default function AiWalkthroughScreen() {
   };
 
   const addObservation = async () => {
-    if (!membership || !session || !observation.trim() || busy) return;
+    if (!membership || !session || !observation.trim() || busy || result) return;
     const text = observation.trim();
     setBusy(true);
     setError(null);
     try {
-      const result = await appendAiWalkthroughChunk({
+      const added = await appendAiWalkthroughChunk({
         p_company_id: membership.companyId,
         p_session_id: session.id,
         p_transcript_text: text,
@@ -115,7 +124,7 @@ export default function AiWalkthroughScreen() {
         p_is_final: true,
         p_captured_at: new Date().toISOString(),
       });
-      setChunks((current) => [...current, { ...result.chunk, source: 'typed', captured_at: new Date().toISOString() }]);
+      setChunks((current) => [...current, { ...added.chunk, source: 'typed', captured_at: new Date().toISOString() }]);
       setObservation('');
     } catch (cause) {
       Alert.alert('Could not save observation', cause instanceof Error ? cause.message : 'Try again.');
@@ -124,9 +133,28 @@ export default function AiWalkthroughScreen() {
     }
   };
 
+  const finish = async () => {
+    if (!membership || !session || !chunks.length || busy || result) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const finalized = await finalizeAiWalkthrough({
+        companyId: membership.companyId,
+        sessionId: session.id,
+        finalizationKey: finalizationKey || Crypto.randomUUID(),
+      });
+      setResult(finalized);
+      setSession((current) => current ? { ...current, status: 'completed', finalized_at: new Date().toISOString(), ai_summary: finalized.summary ?? null } : current);
+    } catch (cause) {
+      Alert.alert('AI walkthrough could not finish', cause instanceof Error ? cause.message : 'Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) return <LoadingScreen label="Preparing AI walkthrough..." />;
   if (!membership) return <Message title="Session unavailable" message="Sign in again to use AI walkthroughs." />;
-  if (!canWalk(membership)) return <Message title="Walkthrough access required" message="Your current role cannot start AI walkthroughs." />;
+  if (!authorized) return <Message title="AI Walkthrough access required" message="This tool is restricted to employee profiles specifically authorized by management." />;
 
   return <ScrollView contentContainerStyle={styles.root} showsVerticalScrollIndicator={false}>
     <View style={styles.topbar}>
@@ -140,7 +168,7 @@ export default function AiWalkthroughScreen() {
     {!session ? <>
       <Card style={styles.hero}>
         <Text style={styles.heroTitle}>Walk it. Say it. Work orders come out the other side.</Text>
-        <Text style={styles.heroText}>Choose the location first. The walkthrough session will keep the property, building, unit, transcript, and later photos tied together so the AI can create the right departmental jobs.</Text>
+        <Text style={styles.heroText}>Choose the location first. The walkthrough keeps the property, building, unit, transcript, and later photos tied together so the AI can create the correct departmental jobs.</Text>
       </Card>
       {properties.length ? <>
         <Selector title="Property" items={properties.map((item) => ({ id: item.id, label: item.name }))} selected={propertyId} onSelect={chooseProperty} />
@@ -150,6 +178,21 @@ export default function AiWalkthroughScreen() {
           <Icon name="mic" color={colors.background} size={22} /><Text style={styles.primaryText}>{busy ? 'Starting...' : 'Start AI Walkthrough'}</Text>
         </Pressable>
       </> : <EmptyState icon="location-outline" title="No property yet" message="Create a property before starting a walkthrough." />}
+    </> : result ? <>
+      <Card style={styles.completeCard}>
+        <View style={styles.completeIcon}><Icon name="checkmark-circle" color={colors.teal} size={30} /></View>
+        <Text style={styles.completeTitle}>{result.issues.length} work order{result.issues.length === 1 ? '' : 's'} created</Text>
+        <Text style={styles.completeText}>{result.summary || 'The walkthrough was interpreted and converted into new work orders.'}</Text>
+      </Card>
+      <Text style={styles.sectionTitle}>Walkthrough results</Text>
+      {result.issues.length ? result.issues.map((issue) => <Card key={issue.id} style={styles.issueCard}>
+        <View style={styles.issueTop}><Badge label={issue.priority || 'normal'} tone={['high','emergency'].includes(issue.priority) ? 'red' : 'amber'} />{issue.needs_review ? <Badge label="Needs review" tone="amber" /> : <Badge label="Created" tone="teal" />}</View>
+        <Text style={styles.issueTitle}>{issue.title}</Text>
+        {issue.room_area ? <Text style={styles.issueMeta}>{issue.room_area}</Text> : null}
+        {issue.review_reason ? <Text style={styles.reviewReason}>{issue.review_reason}</Text> : null}
+        {issue.depends_on_issue_keys?.length ? <Text style={styles.dependency}>Depends on: {issue.depends_on_issue_keys.join(', ')}</Text> : null}
+      </Card>) : <EmptyState icon="checkmark-circle-outline" title="No work detected" message="The AI did not find an actionable work item in this walkthrough." />}
+      <Pressable onPress={() => router.replace('/(app)/work-orders' as never)} style={styles.primary}><Icon name="construct-outline" color={colors.background} size={20} /><Text style={styles.primaryText}>Open work orders</Text></Pressable>
     </> : <>
       <Card style={styles.activeCard}>
         <View style={styles.activeTop}><View style={styles.liveDot} /><Text style={styles.live}>WALKTHROUGH ACTIVE</Text></View>
@@ -159,7 +202,7 @@ export default function AiWalkthroughScreen() {
 
       <View style={styles.voicePreview}>
         <View style={styles.micCircle}><Icon name="mic" color={colors.teal} size={30} /></View>
-        <View style={styles.voiceCopy}><Text style={styles.voiceTitle}>Voice capture is the next wiring step</Text><Text style={styles.voiceText}>This screen is already using the real walkthrough backend. For this build, type observations below so we can verify the session pipeline before connecting live speech transcription.</Text></View>
+        <View style={styles.voiceCopy}><Text style={styles.voiceTitle}>AI interpretation is now connected</Text><Text style={styles.voiceText}>For this validation build, enter observations as text. Finish Walkthrough sends the complete transcript to the secure AI service and automatically creates the resulting work orders. Microphone capture is the next layer.</Text></View>
       </View>
 
       <Text style={styles.sectionTitle}>Running observations</Text>
@@ -177,11 +220,10 @@ export default function AiWalkthroughScreen() {
         <Icon name="add-circle-outline" color={colors.teal} size={20} /><Text style={styles.secondaryText}>{busy ? 'Saving...' : 'Add observation'}</Text>
       </Pressable>
 
-      <Card style={styles.nextCard}>
-        <Text style={styles.nextLabel}>NEXT CONNECTION</Text>
-        <Text style={styles.nextTitle}>Finish → AI interpretation → automatic work orders</Text>
-        <Text style={styles.nextText}>The database is prepared for the AI to classify these observations against your real departments and skills, create separate work orders, and add dependencies such as Drywall before Painting. That server-side AI connection is the next development block.</Text>
-      </Card>
+      <Pressable disabled={!chunks.length || busy} onPress={() => void finish()} style={[styles.finish, (!chunks.length || busy) && styles.disabled]}>
+        <Icon name="sparkles" color={colors.background} size={20} /><Text style={styles.finishText}>{busy ? 'AI is building work orders...' : 'Finish Walkthrough & Create Work Orders'}</Text>
+      </Pressable>
+      <Text style={styles.finishNote}>The AI can create jobs, dependencies, and review flags. It does not dispatch employees automatically.</Text>
     </>}
   </ScrollView>;
 }
@@ -216,6 +258,9 @@ const styles = StyleSheet.create({
   primaryText: { color: colors.background, fontSize: 15, fontWeight: '900' },
   secondary: { alignItems: 'center', backgroundColor: colors.tealDeep, borderColor: colors.teal, borderRadius: 14, borderWidth: 1, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', minHeight: 50 },
   secondaryText: { color: colors.teal, fontSize: 14, fontWeight: '800' },
+  finish: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 15, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', minHeight: 58, marginTop: spacing.sm, paddingHorizontal: spacing.md },
+  finishText: { color: colors.background, fontSize: 14, fontWeight: '900', textAlign: 'center' },
+  finishNote: { color: colors.subtle, fontSize: 11, lineHeight: 17, textAlign: 'center' },
   disabled: { opacity: 0.45 },
   activeCard: { padding: spacing.md },
   activeTop: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm },
@@ -233,10 +278,16 @@ const styles = StyleSheet.create({
   sequence: { color: colors.teal, fontSize: 12, fontWeight: '900' },
   chunkText: { color: colors.text, flex: 1, fontSize: 14, lineHeight: 20 },
   input: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, color: colors.text, minHeight: 120, padding: spacing.md, textAlignVertical: 'top' },
-  nextCard: { backgroundColor: colors.tealDeep, padding: spacing.lg },
-  nextLabel: { color: colors.teal, fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
-  nextTitle: { color: colors.text, fontSize: 16, fontWeight: '900', lineHeight: 22, marginTop: spacing.sm },
-  nextText: { color: colors.muted, fontSize: 12, lineHeight: 19, marginTop: spacing.sm },
+  completeCard: { alignItems: 'center', backgroundColor: colors.tealDeep, padding: spacing.lg },
+  completeIcon: { alignItems: 'center', backgroundColor: colors.background, borderRadius: 999, height: 58, justifyContent: 'center', width: 58 },
+  completeTitle: { color: colors.text, fontSize: 19, fontWeight: '900', marginTop: spacing.md },
+  completeText: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: spacing.sm, textAlign: 'center' },
+  issueCard: { padding: spacing.md },
+  issueTop: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm, justifyContent: 'space-between' },
+  issueTitle: { color: colors.text, fontSize: 16, fontWeight: '900', marginTop: spacing.md },
+  issueMeta: { color: colors.teal, fontSize: 12, fontWeight: '800', marginTop: 5 },
+  reviewReason: { color: colors.amber, fontSize: 12, lineHeight: 18, marginTop: spacing.sm },
+  dependency: { color: colors.muted, fontSize: 11, lineHeight: 17, marginTop: spacing.sm },
   emptyText: { color: colors.subtle, fontSize: 12, lineHeight: 18 },
   errorCard: { backgroundColor: colors.redDeep },
   errorText: { color: colors.text, fontSize: 13 },
