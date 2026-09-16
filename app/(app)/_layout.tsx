@@ -25,6 +25,7 @@ export default function AppLayout() {
       <Tabs.Screen name="properties" options={{ href: null, title: 'Properties & Geofences' }} />
       <Tabs.Screen name="new-work-order" options={{ href: null, title: 'New Work Order' }} />
       <Tabs.Screen name="ai-walkthrough" options={{ href: null, title: 'AI Walkthrough' }} />
+      <Tabs.Screen name="ai-access" options={{ href: null, title: 'AI Walkthrough Access' }} />
     </Tabs>
   );
 }
