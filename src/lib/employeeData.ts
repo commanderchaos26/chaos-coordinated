@@ -18,21 +18,29 @@ async function loadCompanyRows(companyId: string) {
     supabase.from('employee_account_links').select('employee_id,intended_email,status').eq('company_id', companyId),
     supabase.from('role_grants').select('employee_id,role').eq('company_id', companyId).is('revoked_at', null),
     supabase.from('departments').select('id,name,code').eq('company_id', companyId).eq('active', true).order('name'),
-    supabase.from('employee_departments').select('employee_id,department_id,is_primary,active').eq('active', true),
+    supabase.from('employee_departments').select('employee_id,department_id,is_primary,active').eq('company_id', companyId).eq('active', true),
     supabase.from('skills').select('id,name,category,description,active').eq('company_id', companyId).eq('active', true).order('name'),
     supabase.from('employee_skills').select('id,employee_id,skill_id,proficiency,verification_status,verified_by,verified_at,expires_at,notes').eq('company_id', companyId),
     supabase.from('crews').select('id,name,lead_employee_id').eq('company_id', companyId).eq('active', true).order('name'),
-    supabase.from('crew_members').select('crew_id,employee_id,member_role,active').eq('active', true),
-    supabase.from('employee_feature_permissions').select('employee_id,permission_key,granted_at,revoked_at').eq('company_id', companyId).is('revoked_at', null),
+    supabase.from('crew_members').select('crew_id,employee_id,member_role,active').eq('company_id', companyId).eq('active', true),
   ]);
   const failure = results.find((result) => result.error);
   if (failure?.error) throw failure.error;
-  const [employees, links, roles, departments, employeeDepartments, skills, employeeSkills, crews, crewMembers, featurePermissions] = results;
+  const [employees, links, roles, departments, employeeDepartments, skills, employeeSkills, crews, crewMembers] = results;
+
+  // Feature permissions are supplemental profile metadata. A permission-read problem
+  // must never make the core employee directory unusable.
+  const featurePermissionResult = await supabase
+    .from('employee_feature_permissions')
+    .select('employee_id,permission_key,granted_at,revoked_at')
+    .eq('company_id', companyId)
+    .is('revoked_at', null);
+
   return {
     employees: (employees.data ?? []) as Employee[], links: (links.data ?? []) as EmployeeLink[], roles: (roles.data ?? []) as EmployeeRole[],
     departments: (departments.data ?? []) as Department[], employeeDepartments: (employeeDepartments.data ?? []) as EmployeeDepartment[],
     skills: (skills.data ?? []) as Skill[], employeeSkills: (employeeSkills.data ?? []) as EmployeeSkill[], crews: (crews.data ?? []) as Crew[], crewMembers: (crewMembers.data ?? []) as CrewMember[],
-    featurePermissions: (featurePermissions.data ?? []) as EmployeeFeaturePermission[],
+    featurePermissions: featurePermissionResult.error ? [] : (featurePermissionResult.data ?? []) as EmployeeFeaturePermission[],
   };
 }
 
@@ -43,8 +51,8 @@ export async function loadOrganizationData(companyId: string) {
     supabase.from('departments').select('id,name,code,active').eq('company_id', companyId).order('name'),
     supabase.from('crews').select('id,name,notes,lead_employee_id,property_id,active').eq('company_id', companyId).order('name'),
     supabase.from('employees').select('id,display_name,employee_number,employment_status').eq('company_id', companyId).order('display_name'),
-    supabase.from('employee_departments').select('employee_id,department_id,is_primary,active'),
-    supabase.from('crew_members').select('crew_id,employee_id,member_role,active'),
+    supabase.from('employee_departments').select('employee_id,department_id,is_primary,active').eq('company_id', companyId),
+    supabase.from('crew_members').select('crew_id,employee_id,member_role,active').eq('company_id', companyId),
   ]);
   const failure = [departments, crews, employees, employeeDepartments, crewMembers].find((result) => result.error);
   if (failure?.error) throw failure.error;
