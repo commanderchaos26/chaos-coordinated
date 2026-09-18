@@ -41,8 +41,10 @@ function translateKnownError(message: string) {
   if (normalized.includes('walkthrough_already_completed')) return 'That walkthrough has already created its work orders.';
   if (normalized.includes('transcript_text_required')) return 'Say or enter an observation before saving it.';
   if (normalized.includes('no_walkthrough_observations')) return 'Add at least one observation before finishing the walkthrough.';
-  if (normalized.includes('openai_not_configured')) return 'The AI service key has not been connected to Chaos Coordinated yet.';
-  if (normalized.includes('account is not active') || normalized.includes('billing details') || normalized.includes('insufficient_quota') || normalized.includes('credit_balance_exhausted')) return 'The OpenAI API account is not active for paid API usage. Check the API billing method or credit balance, then try again.';
+  if (normalized.includes('gemini_not_configured') || normalized.includes('openai_not_configured')) return 'The AI service key has not been connected to Chaos Coordinated yet.';
+  if (normalized.includes('resource_exhausted') || normalized.includes('rate limit') || normalized.includes('quota')) return 'The free AI service limit has been reached for now. Wait a little and try again.';
+  if (normalized.includes('api key not valid') || normalized.includes('api_key_invalid') || normalized.includes('invalid api key')) return 'The configured AI service key is invalid. Update the server-side AI key and try again.';
+  if (normalized.includes('account is not active') || normalized.includes('billing details') || normalized.includes('credit_balance_exhausted')) return 'The configured paid AI provider is not active. Chaos Coordinated can continue using its free Gemini provider when configured.';
   return message;
 }
 
