@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
-import { appendAiWalkthroughChunk, finalizeAiWalkthrough, startAiWalkthrough, type AiWalkthroughFinalizeResult, type AiWalkthroughSession } from '../../src/lib/aiWalkthroughCommands';
+import { appendAiWalkthroughChunk, finalizeAiWalkthrough, loadAiWalkthroughRecovery, startAiWalkthrough, type AiWalkthroughFinalizeResult, type AiWalkthroughSession } from '../../src/lib/aiWalkthroughCommands';
 import { loadMyFeaturePermissions } from '../../src/lib/featurePermissionCommands';
 import { markTurnListItemProcessed } from '../../src/lib/clientPortalCommands';
 import { loadMembership } from '../../src/lib/membership';
@@ -66,13 +66,48 @@ export default function AiWalkthroughScreen() {
         const loadedProperties = (p.data ?? []) as Property[];
         const loadedBuildings = (b.data ?? []) as Building[];
         const loadedUnits = (u.data ?? []) as Unit[];
+        const loadedQueue = (q.data ?? []) as TurnQueueItem[];
         setProperties(loadedProperties);
         setBuildings(loadedBuildings);
         setUnits(loadedUnits);
         setWorkSites((w.data ?? []) as WorkSite[]);
-        setTurnQueue((q.data ?? []) as TurnQueueItem[]);
+        setTurnQueue(loadedQueue);
 
-        if (linkedTurnoverId) {
+        const recovery = await loadAiWalkthroughRecovery(current.companyId, current.employeeId);
+        if (recovery && (!linkedTurnoverId || recovery.session.turnover_id === linkedTurnoverId)) {
+          setSession(recovery.session);
+          setChunks(recovery.chunks as Chunk[]);
+          setResult(recovery.result);
+          setFinalizationKey(recovery.session.finalization_key || Crypto.randomUUID());
+          setPropertyId(recovery.session.property_id ?? '');
+          setBuildingId(recovery.session.building_id ?? '');
+          setUnitId(recovery.session.unit_id ?? '');
+
+          const recoveredTurn = loadedQueue.find((item) =>
+            item.property_id === recovery.session.property_id
+            && item.building_id === recovery.session.building_id
+            && item.unit_id === recovery.session.unit_id
+          );
+          if (recoveredTurn) {
+            setSelectedTurnItemId(recoveredTurn.id);
+            if (recovery.result?.issues.length) {
+              try {
+                await markTurnListItemProcessed(current.companyId, recoveredTurn.id, recovery.session.id);
+                setTurnQueue((queue) => queue.filter((item) => item.id !== recoveredTurn.id));
+                const recoveredBuilding = loadedBuildings.find((item) => item.id === recovery.session.building_id);
+                const recoveredUnit = loadedUnits.find((item) => item.id === recovery.session.unit_id);
+                setProcessedTurnLabel([
+                  recoveredBuilding?.name ? `Building ${recoveredBuilding.name}` : null,
+                  recoveredUnit ? `Unit ${recoveredUnit.unit_number}` : null,
+                ].filter(Boolean).join(' · '));
+              } catch {
+                // The walkthrough result is still recoverable even if queue cleanup needs another refresh.
+              }
+            }
+          }
+        }
+
+        if (linkedTurnoverId && !recovery) {
           const { data: linked, error: linkedError } = await supabase
             .from('turnovers')
             .select('property_id,building_id,unit_id')
@@ -172,14 +207,31 @@ export default function AiWalkthroughScreen() {
   };
 
   const finish = async () => {
-    if (!membership || !session || !chunks.length || busy || result) return;
+    if (!membership || !session || (!chunks.length && !observation.trim()) || busy || result) return;
     setBusy(true);
     setError(null);
     try {
+      if (observation.trim() && session.status === 'recording') {
+        const text = observation.trim();
+        const added = await appendAiWalkthroughChunk({
+          p_company_id: membership.companyId,
+          p_session_id: session.id,
+          p_transcript_text: text,
+          p_source: 'correction',
+          p_is_final: true,
+          p_captured_at: new Date().toISOString(),
+        });
+        setChunks((current) => [...current, { ...added.chunk, source: 'correction', captured_at: new Date().toISOString() }]);
+        setObservation('');
+      }
+
+      const key = finalizationKey || Crypto.randomUUID();
+      if (!finalizationKey) setFinalizationKey(key);
+
       const finalized = await finalizeAiWalkthrough({
         companyId: membership.companyId,
         sessionId: session.id,
-        finalizationKey: finalizationKey || Crypto.randomUUID(),
+        finalizationKey: key,
       });
       if (selectedTurnItem && finalized.issues.length > 0) {
         try {
@@ -281,14 +333,15 @@ export default function AiWalkthroughScreen() {
         multiline
         placeholder="Example: Bedroom one has two drywall holes. Patch those, then paint the whole wall."
         placeholderTextColor={colors.subtle}
+        editable={session.status === 'recording'}
         style={styles.input}
       />
-      <Pressable disabled={!observation.trim() || busy} onPress={() => void addObservation()} style={[styles.secondary, (!observation.trim() || busy) && styles.disabled]}>
+      <Pressable disabled={!observation.trim() || busy || session.status !== 'recording'} onPress={() => void addObservation()} style={[styles.secondary, (!observation.trim() || busy || session.status !== 'recording') && styles.disabled]}>
         <Icon name="add-circle-outline" color={colors.teal} size={20} /><Text style={styles.secondaryText}>{busy ? 'Saving...' : 'Add observation'}</Text>
       </Pressable>
 
-      <Pressable disabled={!chunks.length || busy} onPress={() => void finish()} style={[styles.finish, (!chunks.length || busy) && styles.disabled]}>
-        <Icon name="sparkles" color={colors.background} size={20} /><Text style={styles.finishText}>{busy ? 'AI is building work orders...' : 'Finish Walkthrough & Create Work Orders'}</Text>
+      <Pressable disabled={(!chunks.length && !observation.trim()) || busy} onPress={() => void finish()} style={[styles.finish, ((!chunks.length && !observation.trim()) || busy) && styles.disabled]}>
+        <Icon name="sparkles" color={colors.background} size={20} /><Text style={styles.finishText}>{busy ? 'AI is building work orders...' : session.status === 'processing' ? 'Check Finalization & Recover Results' : session.status === 'failed' ? 'Retry Finalization' : 'Finish Walkthrough & Create Work Orders'}</Text>
       </Pressable>
       <Text style={styles.finishNote}>The AI can create jobs, dependencies, and review flags. It does not dispatch employees automatically.</Text>
     </>}
