@@ -159,6 +159,7 @@ export default function TaskDetailScreen() {
   const submitCompletion = async () => {
     if (!membership || !assignment || !workOrder || processing) return;
     setProcessing(true);
+    let uploadedCount = 0;
     try {
       const { data: currentAssignment, error: assignmentError } = await supabase
         .from('assignments')
@@ -168,12 +169,22 @@ export default function TaskDetailScreen() {
         .maybeSingle();
       if (assignmentError) throw assignmentError;
       if (!currentAssignment) throw new Error('Assignment not found.');
+
       const currentStatus = String(currentAssignment.status ?? '').toLowerCase();
+      if (currentStatus === 'completed') {
+        setCompletionOpen(false);
+        setCompletionPhotos([]);
+        setCompletionNote('Completed from mobile');
+        await load();
+        Alert.alert('Work already completed', 'This assignment is already complete. Saved completion evidence is shown in the task details.');
+        return;
+      }
       if (!['active', 'paused'].includes(currentStatus)) {
-        throw new Error('Start this assignment before submitting completed work.');
+        throw new Error('Start this assignment before completing work.');
       }
 
-      for (const photo of completionPhotos) {
+      const photosToUpload = [...completionPhotos];
+      for (const photo of photosToUpload) {
         await uploadCompletionPhoto({
           companyId: membership.companyId,
           assignmentId: assignment.id,
@@ -182,6 +193,8 @@ export default function TaskDetailScreen() {
           mimeType: photo.mimeType,
           byteSize: photo.fileSize,
         });
+        uploadedCount += 1;
+        setCompletionPhotos((current) => current.filter((item) => item !== photo));
       }
 
       await transitionAssignment({
@@ -197,12 +210,43 @@ export default function TaskDetailScreen() {
       await load();
       Alert.alert(
         'Work completed',
-        completionPhotos.length
-          ? `Completed with ${completionPhotos.length} completion photo${completionPhotos.length === 1 ? '' : 's'}. Downstream work is now eligible when its dependencies are satisfied.`
+        uploadedCount
+          ? `Completed with ${uploadedCount} completion photo${uploadedCount === 1 ? '' : 's'}. Downstream work is now eligible when its dependencies are satisfied.`
           : 'Work completed. Downstream work is now eligible when its dependencies are satisfied.',
       );
     } catch (cause) {
-      Alert.alert('Could not complete work', cause instanceof Error ? cause.message : 'The work was not completed.');
+      let completedAfterError = false;
+      try {
+        const { data: latest } = await supabase
+          .from('assignments')
+          .select('status')
+          .eq('company_id', membership.companyId)
+          .eq('id', assignment.id)
+          .maybeSingle();
+        completedAfterError = String(latest?.status ?? '').toLowerCase() === 'completed';
+        await load();
+      } catch {
+        // Keep the original error as the primary failure if recovery lookup also fails.
+      }
+
+      if (completedAfterError) {
+        setCompletionOpen(false);
+        setCompletionPhotos([]);
+        setCompletionNote('Completed from mobile');
+        Alert.alert(
+          'Work completed',
+          'The completion reached the server even though the confirmation response was interrupted. Saved evidence is attached to the task.',
+        );
+        return;
+      }
+
+      const message = cause instanceof Error ? cause.message : 'The work was not completed.';
+      Alert.alert(
+        'Could not complete work',
+        uploadedCount
+          ? `${message}\n\n${uploadedCount} photo${uploadedCount === 1 ? ' was' : 's were'} saved successfully and will not be uploaded again. Retry the completion without retaking those photos.`
+          : message,
+      );
     } finally {
       setProcessing(false);
     }

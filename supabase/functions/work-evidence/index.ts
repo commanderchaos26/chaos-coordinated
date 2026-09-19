@@ -12,6 +12,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 });
 
 const allowedMime = new Set(["image/jpeg", "image/png", "image/webp"]);
+const sha256Pattern = /^[a-f0-9]{64}$/;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -109,7 +110,9 @@ Deno.serve(async (req: Request) => {
       }, 409);
     }
 
-    if (action === "register_upload" && !["active", "paused", "submitted"].includes(String(assignment.status))) {
+    // A registration request can arrive after the assignment completion request wins a race.
+    // Allow registration of an already-prepared object, but never allow preparing a new upload after completion.
+    if (action === "register_upload" && !["active", "paused", "submitted", "completed"].includes(String(assignment.status))) {
       return json({
         error: "assignment_not_ready_for_completion_evidence",
         message: "This assignment is not in a state that can accept completion evidence.",
@@ -120,47 +123,117 @@ Deno.serve(async (req: Request) => {
       const mimeType = String(body?.mime_type ?? "image/jpeg").toLowerCase();
       if (!allowedMime.has(mimeType)) return json({ error: "unsupported_media_type" }, 400);
       const extension = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
-      const filename = `${crypto.randomUUID()}.${extension}`;
-      const path = `${companyId}/work-orders/${workOrderId}/${filename}`;
+      const suppliedHash = String(body?.sha256 ?? "").toLowerCase();
+      const sha256 = sha256Pattern.test(suppliedHash) ? suppliedHash : null;
+
+      // New clients send a content hash. The deterministic path makes a retry of the same
+      // photo resolve to the same storage/evidence record. Older clients remain supported.
+      const filename = sha256 ? `${sha256}.${extension}` : `${crypto.randomUUID()}.${extension}`;
+      const folder = sha256
+        ? `${companyId}/work-orders/${workOrderId}/${assignmentId}`
+        : `${companyId}/work-orders/${workOrderId}`;
+      const path = `${folder}/${filename}`;
+
+      if (sha256) {
+        const { data: existingEvidence, error: existingError } = await adminClient
+          .from("evidence_files")
+          .select("id")
+          .eq("storage_bucket", "work-evidence")
+          .eq("storage_path", path)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (existingEvidence?.id) {
+          return json({
+            ok: true,
+            bucket: "work-evidence",
+            path,
+            token: null,
+            upload_required: false,
+            already_registered: true,
+            evidence_file_id: existingEvidence.id,
+          });
+        }
+
+        const { data: objects, error: listError } = await adminClient.storage
+          .from("work-evidence")
+          .list(folder, { search: filename, limit: 10 });
+        if (listError) throw listError;
+        if ((objects ?? []).some((item: any) => item.name === filename)) {
+          return json({
+            ok: true,
+            bucket: "work-evidence",
+            path,
+            token: null,
+            upload_required: false,
+            already_registered: false,
+            evidence_file_id: null,
+          });
+        }
+      }
+
       const { data, error } = await adminClient.storage.from("work-evidence").createSignedUploadUrl(path);
       if (error || !data?.token) throw error ?? new Error("Could not create upload token.");
-      return json({ ok: true, bucket: "work-evidence", path, token: data.token });
+      return json({
+        ok: true,
+        bucket: "work-evidence",
+        path,
+        token: data.token,
+        upload_required: true,
+        already_registered: false,
+        evidence_file_id: null,
+      });
     }
 
     if (action === "register_upload") {
       const path = String(body?.storage_path ?? "");
       const mimeType = String(body?.mime_type ?? "image/jpeg").toLowerCase();
       const byteSize = Number(body?.byte_size ?? 0);
+      const suppliedHash = String(body?.sha256 ?? "").toLowerCase();
+      const sha256 = sha256Pattern.test(suppliedHash) ? suppliedHash : null;
       const expectedPrefix = `${companyId}/work-orders/${workOrderId}/`;
       if (!path.startsWith(expectedPrefix)) return json({ error: "invalid_storage_path" }, 400);
       if (!allowedMime.has(mimeType)) return json({ error: "unsupported_media_type" }, 400);
 
-      const slash = path.lastIndexOf("/");
-      const folder = path.slice(0, slash);
-      const fileName = path.slice(slash + 1);
-      const { data: objects, error: listError } = await adminClient.storage.from("work-evidence").list(folder, { search: fileName, limit: 10 });
-      if (listError) throw listError;
-      const uploaded = (objects ?? []).find((item: any) => item.name === fileName);
-      if (!uploaded) return json({ error: "uploaded_file_not_found" }, 400);
-
-      const effectiveSize = Number(uploaded?.metadata?.size ?? byteSize ?? 0);
-      const { data: evidence, error: evidenceError } = await adminClient
+      let { data: evidence, error: existingEvidenceError } = await adminClient
         .from("evidence_files")
-        .insert({
-          company_id: companyId,
-          storage_bucket: "work-evidence",
-          storage_path: path,
-          media_type: "photo",
-          mime_type: mimeType,
-          byte_size: Number.isFinite(effectiveSize) && effectiveSize > 0 ? effectiveSize : null,
-          captured_by: link.employee_id,
-          captured_at: new Date().toISOString(),
-        })
         .select("id")
-        .single();
-      if (evidenceError || !evidence) throw evidenceError ?? new Error("Could not record evidence.");
+        .eq("storage_bucket", "work-evidence")
+        .eq("storage_path", path)
+        .maybeSingle();
+      if (existingEvidenceError) throw existingEvidenceError;
 
-      const { error: linksError } = await adminClient.from("evidence_links").insert([
+      let createdEvidence = false;
+      if (!evidence) {
+        const slash = path.lastIndexOf("/");
+        const folder = path.slice(0, slash);
+        const fileName = path.slice(slash + 1);
+        const { data: objects, error: listError } = await adminClient.storage.from("work-evidence").list(folder, { search: fileName, limit: 10 });
+        if (listError) throw listError;
+        const uploaded = (objects ?? []).find((item: any) => item.name === fileName);
+        if (!uploaded) return json({ error: "uploaded_file_not_found" }, 400);
+
+        const effectiveSize = Number(uploaded?.metadata?.size ?? byteSize ?? 0);
+        const { data: created, error: evidenceError } = await adminClient
+          .from("evidence_files")
+          .insert({
+            company_id: companyId,
+            storage_bucket: "work-evidence",
+            storage_path: path,
+            media_type: "photo",
+            mime_type: mimeType,
+            byte_size: Number.isFinite(effectiveSize) && effectiveSize > 0 ? effectiveSize : null,
+            sha256,
+            captured_by: link.employee_id,
+            captured_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+        if (evidenceError || !created) throw evidenceError ?? new Error("Could not record evidence.");
+        evidence = created;
+        createdEvidence = true;
+      }
+
+      const { error: linksError } = await adminClient.from("evidence_links").upsert([
         {
           company_id: companyId,
           evidence_file_id: evidence.id,
@@ -177,20 +250,26 @@ Deno.serve(async (req: Request) => {
           purpose: "completion",
           created_by: link.employee_id,
         },
-      ]);
+      ], { onConflict: "evidence_file_id,entity_type,entity_id" });
       if (linksError) throw linksError;
 
-      await adminClient.from("audit_events").insert({
-        company_id: companyId,
-        actor_user_id: userData.user.id,
-        actor_employee_id: link.employee_id,
-        action: "work_order.completion_evidence_added",
-        entity_type: "work_order",
-        entity_id: workOrderId,
-        after_data: { evidence_file_id: evidence.id, assignment_id: assignmentId, storage_path: path },
-      });
+      if (createdEvidence) {
+        await adminClient.from("audit_events").insert({
+          company_id: companyId,
+          actor_user_id: userData.user.id,
+          actor_employee_id: link.employee_id,
+          action: "work_order.completion_evidence_added",
+          entity_type: "work_order",
+          entity_id: workOrderId,
+          after_data: { evidence_file_id: evidence.id, assignment_id: assignmentId, storage_path: path, sha256 },
+        });
+      }
 
-      return json({ ok: true, evidence_file_id: evidence.id });
+      return json({
+        ok: true,
+        evidence_file_id: evidence.id,
+        already_registered: !createdEvidence,
+      });
     }
 
     return json({ error: "unsupported_action" }, 400);
