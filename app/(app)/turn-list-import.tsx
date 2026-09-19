@@ -236,7 +236,7 @@ export default function TurnListImportScreen() {
           <Text style={styles.heroText}>Upload the client’s turn list. The AI extracts only building and apartment numbers. The walkthrough determines what work the apartment actually needs.</Text>
         </Card>
 
-        <Pressable disabled={Boolean(busy)} onPress={chooseSource} style={[styles.uploadButton, busy && styles.disabled]}>
+        <Pressable disabled={Boolean(busy)} onPress={chooseSource} style={[styles.uploadButton, Boolean(busy) && styles.disabled]}>
           <Icon name="cloud-upload-outline" color={colors.background} size={22}/>
           <Text style={styles.uploadText}>{busy === 'upload' ? 'Uploading…' : busy === 'scan' ? 'AI is scanning…' : 'Upload New Turn List'}</Text>
         </Pressable>
@@ -281,7 +281,7 @@ export default function TurnListImportScreen() {
         )}
 
         {turnImport && !committed && items.length ? (
-          <Pressable disabled={Boolean(busy)} onPress={() => void approve()} style={[styles.approveButton, (busy || reviewCount > 0) && styles.disabled]}>
+          <Pressable disabled={Boolean(busy)} onPress={() => void approve()} style={[styles.approveButton, (Boolean(busy) || reviewCount > 0) && styles.disabled]}>
             <Icon name="checkmark-done-outline" color={colors.background} size={21}/>
             <Text style={styles.approveText}>{busy === 'commit' ? 'Building queue…' : reviewCount ? `Review ${reviewCount} item${reviewCount === 1 ? '' : 's'} first` : 'Approve & Add to Walkthrough Queue'}</Text>
           </Pressable>
@@ -302,7 +302,7 @@ export default function TurnListImportScreen() {
             <TextInput value={editBuilding} onChangeText={setEditBuilding} placeholder="Building number or name" placeholderTextColor={colors.subtle} style={styles.input}/>
             <Text style={styles.fieldLabel}>Apartment / Unit</Text>
             <TextInput value={editUnit} onChangeText={setEditUnit} placeholder="Unit number" placeholderTextColor={colors.subtle} style={styles.input}/>
-            <Pressable disabled={Boolean(busy) || !editBuilding.trim() || !editUnit.trim()} onPress={() => void saveCorrection()} style={[styles.approveButton, (busy || !editBuilding.trim() || !editUnit.trim()) && styles.disabled]}>
+            <Pressable disabled={Boolean(busy) || !editBuilding.trim() || !editUnit.trim()} onPress={() => void saveCorrection()} style={[styles.approveButton, (Boolean(busy) || !editBuilding.trim() || !editUnit.trim()) && styles.disabled]}>
               <Text style={styles.approveText}>Save correction</Text>
             </Pressable>
           </View>
