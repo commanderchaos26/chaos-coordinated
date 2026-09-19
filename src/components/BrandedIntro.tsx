@@ -11,7 +11,9 @@ import { colors } from '../theme';
 
 const ARTWORK = require('../../assets/chaos-coordinated-intro.jpg');
 
-const absoluteFill = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };\n\nconst ASSEMBLY_MS = 900;
+const absoluteFill = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };
+
+const ASSEMBLY_MS = 900;
 const HOLD_MS = 2000;
 const EXIT_MS = 340;
 
