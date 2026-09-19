@@ -191,7 +191,7 @@ export default function HomeScreen() {
         const showDecline = status === 'offered';
         const showStart = ['accepted', 'paused'].includes(status);
         const showPause = status === 'active';
-        const showSubmit = ['active', 'paused'].includes(status) || status === 'accepted';
+        const showSubmit = ['active', 'paused'].includes(status);
         return <Card key={assignment.id} style={styles.assignmentCard}><Text style={styles.assignmentTitle}>{task?.title || 'Task'}</Text><View style={styles.assignmentMeta}><Badge label={task?.priority || 'normal'} tone={['urgent', 'high', 'emergency'].includes((task?.priority || '').toLowerCase()) ? 'red' : 'amber'} /><Badge label={formatStatus(assignment.status)} tone={status === 'submitted' ? 'blue' : 'teal'} /></View><Text style={styles.assignmentText}>{task?.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : 'No due date set'}</Text>
           {showDecline && <View style={styles.buttonRow}><Pressable disabled={isBusy} onPress={() => void handleAction(assignment.id, 'accept')} style={[styles.primary, isBusy && styles.disabledButton]}><Text style={styles.primaryText}>Accept</Text></Pressable><Pressable disabled={isBusy} onPress={() => requestReason(assignment.id, 'decline', 'Decline assignment', 'Please provide a reason.', 'No reason provided')} style={[styles.secondary, isBusy && styles.disabledButton]}><Text style={styles.secondaryText}>Decline</Text></Pressable></View>}
           {showStart && <Pressable disabled={isBusy} onPress={() => void handleAction(assignment.id, status === 'paused' ? 'resume' : 'start')} style={[styles.primary, isBusy && styles.disabledButton]}><Text style={styles.primaryText}>{status === 'paused' ? 'Resume' : 'Start'}</Text></Pressable>}
