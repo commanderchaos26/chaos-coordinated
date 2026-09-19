@@ -197,12 +197,14 @@ export async function finalizeAiWalkthrough(params: {
 export async function loadAiWalkthroughRecovery(companyId: string, employeeId: string) {
   const sessionSelect = 'id,company_id,property_id,building_id,unit_id,turnover_id,work_site_id,status,started_by,started_at,finalized_at,ai_summary,model_name,error_message,finalization_key,finalization_started_at,finalization_lease_until,updated_at';
 
+  const resumableCutoff = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
   let { data: session, error } = await supabase
     .from('ai_walkthrough_sessions')
     .select(sessionSelect)
     .eq('company_id', companyId)
     .eq('started_by', employeeId)
     .in('status', ['recording', 'processing', 'failed'])
+    .gte('started_at', resumableCutoff)
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();
