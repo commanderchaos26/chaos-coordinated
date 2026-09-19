@@ -63,6 +63,45 @@ Deno.serve(async (req: Request) => {
     const management = (roles ?? []).some((row: any) => ["owner","operations_manager","supervisor","dispatcher"].includes(row.role));
     if (assignment.employee_id !== link.employee_id && !management) return json({ error: "insufficient_permission" }, 403);
 
+    if (action === "list_completion") {
+      const { data: links, error: linksError } = await adminClient
+        .from("evidence_links")
+        .select("evidence_file_id")
+        .eq("company_id", companyId)
+        .eq("entity_type", "assignment")
+        .eq("entity_id", assignmentId)
+        .eq("purpose", "completion");
+      if (linksError) throw linksError;
+
+      const ids = [...new Set((links ?? []).map((row: any) => row.evidence_file_id).filter(Boolean))];
+      if (!ids.length) return json({ ok: true, evidence: [] });
+
+      const { data: files, error: filesError } = await adminClient
+        .from("evidence_files")
+        .select("id,storage_bucket,storage_path,mime_type,byte_size,captured_at")
+        .eq("company_id", companyId)
+        .in("id", ids)
+        .order("captured_at", { ascending: false });
+      if (filesError) throw filesError;
+
+      const evidence = [];
+      for (const file of files ?? []) {
+        const { data: signed, error: signedError } = await adminClient.storage
+          .from(file.storage_bucket)
+          .createSignedUrl(file.storage_path, 900);
+        if (signedError || !signed?.signedUrl) throw signedError ?? new Error("Could not create evidence read link.");
+        evidence.push({
+          id: file.id,
+          signedUrl: signed.signedUrl,
+          mimeType: file.mime_type,
+          byteSize: file.byte_size,
+          capturedAt: file.captured_at,
+        });
+      }
+
+      return json({ ok: true, evidence });
+    }
+
     if (action === "prepare_upload" && !["active", "paused"].includes(String(assignment.status))) {
       return json({
         error: "assignment_not_ready_for_completion_evidence",

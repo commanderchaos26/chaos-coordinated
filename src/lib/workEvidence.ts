@@ -1,5 +1,13 @@
 import { supabase } from './supabase';
 
+export type CompletionEvidence = {
+  id: string;
+  signedUrl: string;
+  mimeType: string | null;
+  byteSize: number | null;
+  capturedAt: string;
+};
+
 type PrepareResult = {
   ok: boolean;
   bucket: string;
@@ -12,6 +20,22 @@ async function invoke(body: Record<string, unknown>) {
   if (error) throw error;
   if (data?.error) throw new Error(data.message || data.error);
   return data;
+}
+
+
+export async function getCompletionEvidence(params: {
+  companyId: string;
+  assignmentId: string;
+  workOrderId: string;
+}) {
+  const data = await invoke({
+    action: 'list_completion',
+    company_id: params.companyId,
+    assignment_id: params.assignmentId,
+    work_order_id: params.workOrderId,
+  }) as { ok: boolean; evidence: CompletionEvidence[] };
+
+  return data.evidence ?? [];
 }
 
 export async function uploadCompletionPhoto(params: {
