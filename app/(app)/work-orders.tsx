@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon, SectionHeader } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
@@ -41,7 +41,7 @@ export default function WorkOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -108,9 +108,11 @@ export default function WorkOrdersScreen() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load work orders.');
     } finally { setLoading(false); }
-  };
+  }, []);
 
-  useEffect(() => { void load(); }, []);
+  useFocusEffect(useCallback(() => {
+    void load();
+  }, [load]));
 
   const visibleRows = useMemo(() => rows.filter((item) => `${item.title} ${item.status} ${item.priority} ${item.employee_name ?? ''} ${item.property_name ?? ''} ${item.unit_number ?? ''} ${item.department_name ?? ''}`.toLowerCase().includes(query.toLowerCase())), [query, rows]);
 
