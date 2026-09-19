@@ -187,7 +187,7 @@ export default function TaskDetailScreen() {
   };
 
   const openCompletion = () => {
-    setCompletionNote('Submitted from mobile');
+    setCompletionNote('Completed from mobile');
     setCompletionPhotos([]);
     setCompletionOpen(true);
   };
