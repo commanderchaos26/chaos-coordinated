@@ -3,9 +3,10 @@
     "name": "Chaos Coordinated",
     "slug": "chaos-coordinated",
     "scheme": "chaoscoordinated",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#07131C",
     "plugins": [
       "expo-router",
       [
@@ -25,7 +26,7 @@
       [
         "expo-notifications",
         {
-          "color": "#29D3B2",
+          "color": "#32D4B3",
           "defaultChannelName": "Assignments"
         }
       ]
@@ -36,6 +37,7 @@
     },
     "android": {
       "package": "com.digitaldivide.chaoscoordinated",
+      "versionCode": 2,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",

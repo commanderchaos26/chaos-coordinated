@@ -1,13 +1,48 @@
 import { Platform } from 'react-native';
 
 export const colors = {
-  background: '#0B1117', surface: '#121B24', surfaceRaised: '#18232E', surfaceSoft: '#1D2A35', border: '#273743', text: '#F4F7F8', muted: '#8D9BA5', subtle: '#60717C', teal: '#29D3B2', tealDeep: '#123E3C', blue: '#5FA8FF', blueDeep: '#172F4A', amber: '#F4B65F', amberDeep: '#49351C', red: '#FF7474', redDeep: '#4A232A', white: '#FFFFFF',
+  background: '#07131C',
+  canvas: '#081823',
+  surface: '#0D1E29',
+  surfaceRaised: '#122633',
+  surfaceSoft: '#18313F',
+  border: '#254352',
+  borderStrong: '#315666',
+  text: '#F4F9FB',
+  muted: '#9AAAB5',
+  subtle: '#657D8B',
+  teal: '#32D4B3',
+  tealBright: '#5BE5C9',
+  tealDeep: '#0A3B37',
+  blue: '#55B7FF',
+  blueDeep: '#103753',
+  amber: '#FFB84D',
+  amberDeep: '#4B3415',
+  red: '#FF6673',
+  redDeep: '#49212A',
+  white: '#FFFFFF',
+  nav: '#091722',
+  scrim: 'rgba(2, 10, 15, 0.76)',
 };
+
 export const spacing = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 30 };
+
+export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
+
 export const typography = {
-  title: { fontSize: 28, lineHeight: 34, fontWeight: '800' as const, letterSpacing: -0.4 },
-  heading: { fontSize: 19, lineHeight: 24, fontWeight: '800' as const },
+  title: { fontSize: 28, lineHeight: 34, fontWeight: '900' as const, letterSpacing: -0.5 },
+  heading: { fontSize: 19, lineHeight: 24, fontWeight: '800' as const, letterSpacing: -0.2 },
   body: { fontSize: 15, lineHeight: 21 },
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: '700' as const, letterSpacing: 0.4 },
+  caption: { fontSize: 12, lineHeight: 16, fontWeight: '700' as const, letterSpacing: 0.35 },
 };
-export const shadow = Platform.select({ ios: { shadowColor: '#000', shadowOpacity: 0.24, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } }, android: { elevation: 4 }, default: {} });
+
+export const shadow = Platform.select({
+  ios: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  android: { elevation: 5 },
+  default: {},
+});
