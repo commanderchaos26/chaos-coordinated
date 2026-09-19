@@ -9,7 +9,7 @@ import { respondToAssignment, transitionAssignment } from '../../src/lib/dispatc
 import { formatStatus } from '../../src/lib/employeeData';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
-import { uploadCompletionPhoto } from '../../src/lib/workEvidence';
+import { getCompletionEvidence, uploadCompletionPhoto, type CompletionEvidence } from '../../src/lib/workEvidence';
 import { colors, spacing } from '../../src/theme';
 
 export default function TaskDetailScreen() {
@@ -24,6 +24,20 @@ export default function TaskDetailScreen() {
   const [completionOpen, setCompletionOpen] = useState(false);
   const [completionNote, setCompletionNote] = useState('Completed from mobile');
   const [completionPhotos, setCompletionPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [storedEvidence, setStoredEvidence] = useState<CompletionEvidence[]>([]);
+
+  const refreshStoredEvidence = async (current: any, assignmentRow: any, workOrderId: string) => {
+    try {
+      const evidence = await getCompletionEvidence({
+        companyId: current.companyId,
+        assignmentId: assignmentRow.id,
+        workOrderId,
+      });
+      setStoredEvidence(evidence);
+    } catch {
+      setStoredEvidence([]);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -58,12 +72,14 @@ export default function TaskDetailScreen() {
 
         setAssignment(exactAssignment);
         setWorkOrder(workOrderResult.data);
+        await refreshStoredEvidence(current, exactAssignment, exactAssignment.work_order_id);
         return;
       }
 
       if (!id) {
         setAssignment(null);
         setWorkOrder(null);
+        setStoredEvidence([]);
         return;
       }
 
@@ -75,8 +91,14 @@ export default function TaskDetailScreen() {
       if (workOrderResult.error) throw workOrderResult.error;
       if (assignmentResult.error) throw assignmentResult.error;
 
+      const latestAssignment = (assignmentResult.data ?? [])[0] ?? null;
       setWorkOrder(workOrderResult.data);
-      setAssignment((assignmentResult.data ?? [])[0] ?? null);
+      setAssignment(latestAssignment);
+      if (latestAssignment && workOrderResult.data?.id) {
+        await refreshStoredEvidence(current, latestAssignment, workOrderResult.data.id);
+      } else {
+        setStoredEvidence([]);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load task.');
     } finally {
@@ -180,7 +202,7 @@ export default function TaskDetailScreen() {
           : 'Work completed. Downstream work is now eligible when its dependencies are satisfied.',
       );
     } catch (cause) {
-      Alert.alert('Could not submit work', cause instanceof Error ? cause.message : 'The work was not submitted.');
+      Alert.alert('Could not complete work', cause instanceof Error ? cause.message : 'The work was not completed.');
     } finally {
       setProcessing(false);
     }
@@ -304,6 +326,22 @@ export default function TaskDetailScreen() {
         <EmptyState icon="construct-outline" title="Task not loaded" message="This task has no visible work-order details." />
       )}
 
+
+      {storedEvidence.length ? (
+        <Card style={styles.card}>
+          <Text style={styles.subTitle}>Saved completion evidence</Text>
+          <Text style={styles.metaText}>{storedEvidence.length} saved photo${storedEvidence.length === 1 ? '' : 's'} attached to this assignment.</Text>
+          <View style={styles.savedPhotoGrid}>
+            {storedEvidence.map((item) => (
+              <View key={item.id} style={styles.savedPhotoWrap}>
+                <Image source={{ uri: item.signedUrl }} style={styles.savedPhoto} />
+                <Text style={styles.savedPhotoDate}>{new Date(item.capturedAt).toLocaleString()}</Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
       {assignment && (
         <Card style={styles.card}>
           <Text style={styles.subTitle}>Assignment</Text>
@@ -335,7 +373,7 @@ export default function TaskDetailScreen() {
               </Pressable>
               <Pressable onPress={openCompletion} style={styles.primary}>
                 <Icon name="camera-outline" color={colors.background} size={18} />
-                <Text style={styles.primaryText}>Submit work</Text>
+                <Text style={styles.primaryText}>Complete work</Text>
               </Pressable>
             </View>
           )}
@@ -345,7 +383,7 @@ export default function TaskDetailScreen() {
               <Pressable onPress={() => void handleAction('pause')} style={styles.secondary}><Text style={styles.secondaryText}>Pause</Text></Pressable>
               <Pressable onPress={openCompletion} style={styles.primary}>
                 <Icon name="camera-outline" color={colors.background} size={18} />
-                <Text style={styles.primaryText}>Submit work</Text>
+                <Text style={styles.primaryText}>Complete work</Text>
               </Pressable>
             </View>
           )}
@@ -403,6 +441,10 @@ const styles = StyleSheet.create({
   removePhoto: { backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 999, position: 'absolute', right: 4, top: 4 },
   photoEmpty: { alignItems: 'center', borderColor: colors.border, borderRadius: 14, borderStyle: 'dashed', borderWidth: 1, flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, padding: spacing.md },
   photoEmptyText: { color: colors.subtle, flex: 1, fontSize: 12 },
+  savedPhotoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
+  savedPhotoWrap: { width: 108 },
+  savedPhoto: { borderRadius: 12, height: 108, width: 108 },
+  savedPhotoDate: { color: colors.subtle, fontSize: 9, lineHeight: 13, marginTop: 5 },
   fieldLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginTop: spacing.lg, textTransform: 'uppercase' },
   noteInput: { backgroundColor: colors.background, borderColor: colors.border, borderRadius: 14, borderWidth: 1, color: colors.text, marginTop: spacing.sm, minHeight: 90, padding: spacing.md, textAlignVertical: 'top' },
   modalActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
