@@ -39,6 +39,7 @@ export default function TurnListImportScreen() {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [clientName, setClientName] = useState('');
   const [propertyName, setPropertyName] = useState('');
+  const [propertyActive, setPropertyActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [editItem, setEditItem] = useState<ItemRow | null>(null);
@@ -56,8 +57,8 @@ export default function TurnListImportScreen() {
       if (!current) return;
 
       const [clientResult, propertyResult, importResult] = await Promise.all([
-        supabase.from('clients').select('name').eq('company_id', current.companyId).eq('id', clientId).maybeSingle(),
-        supabase.from('properties').select('name').eq('company_id', current.companyId).eq('id', propertyId).maybeSingle(),
+        supabase.from('clients').select('name,active').eq('company_id', current.companyId).eq('id', clientId).maybeSingle(),
+        supabase.from('properties').select('name,active').eq('company_id', current.companyId).eq('id', propertyId).maybeSingle(),
         supabase
           .from('turn_list_imports')
           .select('id,status,total_items,pending_count,needs_review_count,error_message,created_at')
@@ -72,6 +73,8 @@ export default function TurnListImportScreen() {
       if (importResult.error) throw importResult.error;
       setClientName(clientResult.data?.name ?? 'Client');
       setPropertyName(propertyResult.data?.name ?? 'Property');
+      const isActive = Boolean(clientResult.data?.active && propertyResult.data?.active);
+      setPropertyActive(isActive);
 
       const latest = (importResult.data ?? [])[0] as ImportRow | undefined;
       setTurnImport(latest ?? null);
@@ -88,6 +91,10 @@ export default function TurnListImportScreen() {
         setItems((itemRows ?? []) as ItemRow[]);
       } else {
         setItems([]);
+      }
+
+      if (!isActive) {
+        setError('This client or property is archived. Turn-list uploads, scans, corrections, and queue changes are disabled.');
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load turn-list import.');
@@ -115,6 +122,10 @@ export default function TurnListImportScreen() {
 
   const uploadAsset = async (asset: { uri: string; name: string; mimeType: string; size?: number | null }) => {
     if (!membership || !clientId || !propertyId) return;
+    if (!propertyActive) {
+      Alert.alert('Property archived', 'Turn-list uploads are disabled for archived properties.');
+      return;
+    }
     setBusy('upload');
     try {
       const uploaded = await uploadClientDocument({
@@ -185,7 +196,7 @@ export default function TurnListImportScreen() {
   };
 
   const saveCorrection = async () => {
-    if (!membership || !editItem || !editBuilding.trim() || !editUnit.trim()) return;
+    if (!membership || !propertyActive || !editItem || !editBuilding.trim() || !editUnit.trim()) return;
     setBusy(editItem.id);
     try {
       await correctTurnListItem(membership.companyId, editItem.id, editBuilding.trim(), editUnit.trim());
@@ -199,7 +210,7 @@ export default function TurnListImportScreen() {
   };
 
   const approve = async () => {
-    if (!membership || !turnImport) return;
+    if (!membership || !propertyActive || !turnImport) return;
     const reviewCount = items.filter((item) => item.status === 'needs_review').length;
     if (reviewCount) {
       Alert.alert('Review required', `Correct the ${reviewCount} highlighted item${reviewCount === 1 ? '' : 's'} before adding this list to the walkthrough queue.`);
@@ -236,7 +247,7 @@ export default function TurnListImportScreen() {
           <Text style={styles.heroText}>Upload the client’s turn list. The AI extracts only building and apartment numbers. The walkthrough determines what work the apartment actually needs.</Text>
         </Card>
 
-        <Pressable disabled={Boolean(busy)} onPress={chooseSource} style={[styles.uploadButton, Boolean(busy) && styles.disabled]}>
+        <Pressable disabled={Boolean(busy) || !propertyActive} onPress={chooseSource} style={[styles.uploadButton, (Boolean(busy) || !propertyActive) && styles.disabled]}>
           <Icon name="cloud-upload-outline" color={colors.background} size={22}/>
           <Text style={styles.uploadText}>{busy === 'upload' ? 'Uploading…' : busy === 'scan' ? 'AI is scanning…' : 'Upload New Turn List'}</Text>
         </Pressable>
@@ -280,14 +291,14 @@ export default function TurnListImportScreen() {
           <EmptyState icon="scan-outline" title="No apartments extracted yet" message="Upload a photo, PDF, or text document to build the turn queue." />
         )}
 
-        {turnImport && !committed && items.length ? (
+        {propertyActive && turnImport && !committed && items.length ? (
           <Pressable disabled={Boolean(busy)} onPress={() => void approve()} style={[styles.approveButton, (Boolean(busy) || reviewCount > 0) && styles.disabled]}>
             <Icon name="checkmark-done-outline" color={colors.background} size={21}/>
             <Text style={styles.approveText}>{busy === 'commit' ? 'Building queue…' : reviewCount ? `Review ${reviewCount} item${reviewCount === 1 ? '' : 's'} first` : 'Approve & Add to Walkthrough Queue'}</Text>
           </Pressable>
         ) : null}
 
-        {committed ? (
+        {propertyActive && committed ? (
           <Pressable onPress={() => router.replace('/(app)/ai-walkthrough' as never)} style={styles.approveButton}>
             <Icon name="mic-outline" color={colors.background} size={21}/><Text style={styles.approveText}>Open AI Walkthrough Queue</Text>
           </Pressable>
