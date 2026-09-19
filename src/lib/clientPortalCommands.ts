@@ -1,3 +1,4 @@
+import { File as ExpoFile } from 'expo-file-system';
 import { supabase } from './supabase';
 
 function rpcErrorMessage(error: unknown) {
@@ -36,9 +37,39 @@ type UploadDocumentInput = {
 
 async function invoke(functionName: string, body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke(functionName, { body });
-  if (error) throwRpcError(error);
+  if (error) {
+    const context = (error as { context?: Response }).context;
+    if (context && typeof context.clone === 'function') {
+      try {
+        const payload = await context.clone().json() as { message?: string; error?: string };
+        if (payload?.message || payload?.error) throwRpcError(payload.message || payload.error);
+      } catch (contextError) {
+        if (contextError instanceof Error && contextError.message !== 'Unexpected end of JSON input') throw contextError;
+      }
+    }
+    throwRpcError(error);
+  }
   if (data?.error) throw new Error(data.message || data.error);
   return data;
+}
+
+async function readLocalAsset(uri: string) {
+  try {
+    const file = new ExpoFile(uri);
+    const bytes = await file.arrayBuffer();
+    if (!bytes.byteLength) throw new Error('Selected file is empty.');
+    return bytes;
+  } catch {
+    try {
+      const response = await fetch(uri);
+      if (!response.ok) throw new Error('Local file read failed.');
+      const bytes = await response.arrayBuffer();
+      if (!bytes.byteLength) throw new Error('Selected file is empty.');
+      return bytes;
+    } catch {
+      throw new Error('Could not read the selected photo or document from this device. Please choose it again.');
+    }
+  }
 }
 
 export async function createClientWithProperty(params: {
@@ -68,6 +99,8 @@ export async function createClientWithProperty(params: {
 }
 
 export async function uploadClientDocument(input: UploadDocumentInput) {
+  const bytes = await readLocalAsset(input.uri);
+
   const prepared = await invoke('client-document', {
     action: 'prepare_upload',
     company_id: input.companyId,
@@ -76,7 +109,7 @@ export async function uploadClientDocument(input: UploadDocumentInput) {
     document_type: input.documentType,
     file_name: input.fileName,
     mime_type: input.mimeType,
-    byte_size: input.byteSize ?? null,
+    byte_size: input.byteSize ?? bytes.byteLength,
   }) as {
     document_id: string;
     bucket: string;
@@ -84,10 +117,6 @@ export async function uploadClientDocument(input: UploadDocumentInput) {
     token: string;
     version_no: number;
   };
-
-  const response = await fetch(input.uri);
-  if (!response.ok) throw new Error('Could not read the selected document from this device.');
-  const bytes = await response.arrayBuffer();
 
   const { error: uploadError } = await supabase.storage
     .from(prepared.bucket)
