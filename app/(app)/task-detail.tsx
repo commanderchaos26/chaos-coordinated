@@ -280,7 +280,7 @@ export default function TaskDetailScreen() {
               </View>
             )}
 
-            <Text style={styles.fieldLabel}>Submission note</Text>
+            <Text style={styles.fieldLabel}>Completion note</Text>
             <TextInput
               value={completionNote}
               onChangeText={setCompletionNote}
@@ -330,7 +330,7 @@ export default function TaskDetailScreen() {
       {storedEvidence.length ? (
         <Card style={styles.card}>
           <Text style={styles.subTitle}>Saved completion evidence</Text>
-          <Text style={styles.metaText}>{storedEvidence.length} saved photo${storedEvidence.length === 1 ? '' : 's'} attached to this assignment.</Text>
+          <Text style={styles.metaText}>{storedEvidence.length} saved {storedEvidence.length === 1 ? 'photo' : 'photos'} attached to this assignment.</Text>
           <View style={styles.savedPhotoGrid}>
             {storedEvidence.map((item) => (
               <View key={item.id} style={styles.savedPhotoWrap}>
