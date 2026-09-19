@@ -25,7 +25,7 @@ export default function NewClientScreen() {
 
     setBusy(true);
 
-    let created: { ok: boolean; client: { id?: string } | null; property: unknown } | null = null;
+    let created: { ok: boolean; client: { id?: string } | null; property: { id?: string } | null } | null = null;
     try {
       const membership = await loadMembership();
       if (!membership) throw new Error('Sign in again before creating a client.');
@@ -55,10 +55,17 @@ export default function NewClientScreen() {
     setBusy(false);
 
     try {
-      router.replace({
-        pathname: '/(app)/client-detail' as never,
-        params: { clientId: created.client.id },
-      });
+      if (created.property?.id) {
+        router.replace({
+          pathname: '/(app)/turn-list-import' as never,
+          params: { clientId: created.client.id, propertyId: created.property.id },
+        });
+      } else {
+        router.replace({
+          pathname: '/(app)/client-detail' as never,
+          params: { clientId: created.client.id },
+        });
+      }
     } catch (cause) {
       Alert.alert(
         'Client created',
