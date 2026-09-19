@@ -11,7 +11,7 @@ function TabIcon({ name, activeName, focused, color, size }: {
   name: IconName;
   activeName: IconName;
   focused: boolean;
-  color: string;
+  color: ComponentProps<typeof Ionicons>['color'];
   size: number;
 }) {
   return (
