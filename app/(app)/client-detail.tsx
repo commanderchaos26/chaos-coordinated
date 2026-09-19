@@ -41,6 +41,7 @@ export default function ClientDetailScreen() {
         .select('id,name,phone,email')
         .eq('company_id', current.companyId)
         .eq('id', clientId)
+        .eq('active', true)
         .maybeSingle();
       if (clientError) throw clientError;
       if (!clientRow) throw new Error('Client not found.');
@@ -51,41 +52,53 @@ export default function ClientDetailScreen() {
         .select('property_id,is_primary')
         .eq('company_id', current.companyId)
         .eq('client_id', clientId)
-        .order('is_primary', { ascending: false })
-        .limit(1);
+        .order('is_primary', { ascending: false });
       if (linksError) throw linksError;
 
-      const propertyId = links?.[0]?.property_id ?? null;
-      if (propertyId) {
-        const { data: propertyRow, error: propertyError } = await supabase
+      let activeProperty: Property | null = null;
+      const propertyIds = [...new Set((links ?? []).map((item) => item.property_id))];
+      if (propertyIds.length) {
+        const { data: propertyRows, error: propertyError } = await supabase
           .from('properties')
           .select('id,name,address_line1,city,region,postal_code')
-          .eq('id', propertyId)
-          .maybeSingle();
-        if (propertyError) throw propertyError;
-        setProperty(propertyRow as Property | null);
-      } else {
-        setProperty(null);
-      }
-
-      const [documentResult, importResult] = await Promise.all([
-        supabase
-          .from('client_documents')
-          .select('id,document_type,version_no,original_file_name,status,created_at')
           .eq('company_id', current.companyId)
-          .eq('client_id', clientId)
-          .order('created_at', { ascending: false }),
-        supabase
+          .eq('active', true)
+          .in('id', propertyIds);
+        if (propertyError) throw propertyError;
+
+        const activeMap = new Map((propertyRows ?? []).map((item) => [item.id, item as Property]));
+        for (const link of links ?? []) {
+          const candidate = activeMap.get(link.property_id);
+          if (candidate) {
+            activeProperty = candidate;
+            break;
+          }
+        }
+      }
+      setProperty(activeProperty);
+
+      const documentResult = await supabase
+        .from('client_documents')
+        .select('id,document_type,version_no,original_file_name,status,created_at')
+        .eq('company_id', current.companyId)
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+      if (documentResult.error) throw documentResult.error;
+      setDocuments((documentResult.data ?? []) as DocumentRow[]);
+
+      if (activeProperty) {
+        const importResult = await supabase
           .from('turn_list_imports')
           .select('id,status,total_items,pending_count,needs_review_count,created_at')
           .eq('company_id', current.companyId)
           .eq('client_id', clientId)
-          .order('created_at', { ascending: false }),
-      ]);
-      if (documentResult.error) throw documentResult.error;
-      if (importResult.error) throw importResult.error;
-      setDocuments((documentResult.data ?? []) as DocumentRow[]);
-      setImports((importResult.data ?? []) as ImportRow[]);
+          .eq('property_id', activeProperty.id)
+          .order('created_at', { ascending: false });
+        if (importResult.error) throw importResult.error;
+        setImports((importResult.data ?? []) as ImportRow[]);
+      } else {
+        setImports([]);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load client.');
     } finally {
@@ -191,7 +204,7 @@ export default function ClientDetailScreen() {
         <Text style={styles.cardTitle}>Client information</Text>
         <Info icon="call-outline" text={client?.phone || 'No phone number'} />
         <Info icon="mail-outline" text={client?.email || 'No email address'} />
-        <Info icon="business-outline" text={property?.name || 'No property'} />
+        <Info icon="business-outline" text={property?.name || 'No active property'} />
         <Info icon="location-outline" text={address || 'No property address'} />
       </Card>
 
