@@ -68,7 +68,14 @@ export default function HomeScreen() {
         work_orders: orderMap.get(assignment.work_order_id) ?? null,
       })) as AssignmentRow[];
 
-      setAssignments(enriched);
+      const activeAssignments = enriched.filter((assignment) => {
+        const assignmentStatus = String(assignment.status ?? '').toLowerCase();
+        const workOrderStatus = String(assignment.work_orders?.status ?? '').toLowerCase();
+        return !['completed', 'cancelled'].includes(assignmentStatus)
+          && !['completed', 'cancelled', 'closed'].includes(workOrderStatus);
+      });
+
+      setAssignments(activeAssignments);
       setWorkOrders(orders);
       setNotificationCount(notificationResult.error ? 0 : (notificationResult.data ?? []).length);
     } catch (cause) {
