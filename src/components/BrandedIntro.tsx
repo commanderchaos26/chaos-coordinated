@@ -11,7 +11,7 @@ import { colors } from '../theme';
 
 const ARTWORK = require('../../assets/chaos-coordinated-intro.jpg');
 
-const ASSEMBLY_MS = 900;
+const absoluteFill = { position: 'absolute' as const, top: 0, right: 0, bottom: 0, left: 0 };\n\nconst ASSEMBLY_MS = 900;
 const HOLD_MS = 2000;
 const EXIT_MS = 340;
 
@@ -228,7 +228,7 @@ export function BrandedIntro({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...absoluteFill,
     backgroundColor: '#06131F',
     elevation: 1000,
     overflow: 'hidden',
@@ -239,13 +239,13 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...absoluteFill,
   },
   artwork: {
-    ...StyleSheet.absoluteFillObject,
+    ...absoluteFill,
   },
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...absoluteFill,
     backgroundColor: 'rgba(3, 12, 20, 0.16)',
   },
   pixelAnchor: {
