@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ActionTile, Badge, Card, EmptyState, Icon, MetricCard, SectionHeader } from '../../src/components/FieldUI';
 import { TextEntryModal } from '../../src/components/TextEntryModal';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
@@ -42,7 +42,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -76,13 +76,22 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    void load();
+  }, [load]));
 
   useEffect(() => {
-    void load();
     const unsub = registerNotificationTapHandler();
-    return () => unsub();
-  }, []);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => {
+      unsub();
+      appStateSubscription.remove();
+    };
+  }, [load]);
 
   const metrics = useMemo(() => {
     const openCount = workOrders.filter((item) => !['completed', 'cancelled', 'closed'].includes((item.status ?? '').toLowerCase())).length;
