@@ -221,28 +221,20 @@ Return ONLY one valid JSON object with this exact top-level shape:
 Use JSON null for unknown nullable values. Do not use markdown fences, comments, or prose outside the JSON object.
 `;
 
-    const interactionResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": geminiKey,
-        "Content-Type": "application/json",
+    const fullPrompt = `${instructions}\n\n${jsonContract}\n\nWalkthrough context:\n${JSON.stringify(context)}`;
+
+    const interactionResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(geminiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          store: false,
+          input: fullPrompt,
+        }),
       },
-      body: JSON.stringify({
-        model: modelName,
-        store: false,
-        system_instruction: instructions,
-        input: `Walkthrough context:\n${JSON.stringify(context)}`,
-        response_format: {
-          type: "text",
-          mime_type: "application/json",
-          schema: cleanSchema(schema),
-        },
-        generation_config: {
-          thinking_level: "low",
-          max_output_tokens: 8000,
-        },
-      }),
-    });
+    );
 
     const geminiPayload = await interactionResponse.json();
     if (!interactionResponse.ok) {
