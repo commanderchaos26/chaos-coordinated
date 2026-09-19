@@ -10,6 +10,19 @@
     "plugins": [
       "expo-router",
       [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#06131F",
+          "image": "./assets/chaos-splash-icon.jpg",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#06131F",
+            "image": "./assets/chaos-splash-icon.jpg"
+          }
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "Chaos Coordinated uses your location only when you perform a work action that requires location verification."
