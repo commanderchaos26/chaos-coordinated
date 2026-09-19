@@ -24,11 +24,13 @@ export default function NewClientScreen() {
     }
 
     setBusy(true);
+
+    let created: { ok: boolean; client: { id?: string } | null; property: unknown } | null = null;
     try {
       const membership = await loadMembership();
       if (!membership) throw new Error('Sign in again before creating a client.');
 
-      const created = await createClientWithProperty({
+      created = await createClientWithProperty({
         p_company_id: membership.companyId,
         p_client_name: clientName.trim(),
         p_phone: phone.trim() || null,
@@ -41,14 +43,28 @@ export default function NewClientScreen() {
         p_country_code: 'US',
       });
 
+      if (!created?.ok || !created.client?.id) {
+        throw new Error('The server did not return the new client record.');
+      }
+    } catch (cause) {
+      Alert.alert('Could not create client', getErrorMessage(cause, 'Try again.'));
+      setBusy(false);
+      return;
+    }
+
+    setBusy(false);
+
+    try {
       router.replace({
         pathname: '/(app)/client-detail' as never,
         params: { clientId: created.client.id },
       });
     } catch (cause) {
-      Alert.alert('Could not create client', cause instanceof Error ? cause.message : 'Try again.');
-    } finally {
-      setBusy(false);
+      Alert.alert(
+        'Client created',
+        `The client was saved successfully, but the detail screen could not open. Open Client Portal to continue.\n\n${getErrorMessage(cause, 'Navigation failed.')}`,
+        [{ text: 'OK', onPress: () => router.replace('/(app)/clients' as never) }],
+      );
     }
   };
 
@@ -83,6 +99,16 @@ export default function NewClientScreen() {
       </Pressable>
     </ScrollView>
   );
+}
+
+function getErrorMessage(cause: unknown, fallback: string) {
+  if (cause instanceof Error && cause.message) return cause.message;
+  if (typeof cause === 'object' && cause !== null && 'message' in cause) {
+    const message = (cause as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  if (typeof cause === 'string' && cause.trim()) return cause;
+  return fallback;
 }
 
 function Field(props: any) {
