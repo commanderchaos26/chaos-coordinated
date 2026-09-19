@@ -1,5 +1,28 @@
 import { supabase } from './supabase';
 
+function rpcErrorMessage(error: unknown) {
+  const raw = typeof error === 'object' && error !== null && 'message' in error
+    ? String((error as { message?: unknown }).message ?? '')
+    : error instanceof Error
+      ? error.message
+      : String(error ?? '');
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('property_name_already_exists')) {
+    return 'An active property with that name already exists. Use a different property name or open the existing property.';
+  }
+  if (normalized.includes('property_archived')) {
+    return 'This property is archived and cannot receive new work or client uploads.';
+  }
+  if (normalized.includes('insufficient_permission')) {
+    return 'You do not have permission to perform this client-management action.';
+  }
+  return raw || 'The client request could not be completed.';
+}
+
+function throwRpcError(error: unknown): never {
+  throw new Error(rpcErrorMessage(error));
+}
+
 type UploadDocumentInput = {
   companyId: string;
   clientId: string;
@@ -13,7 +36,7 @@ type UploadDocumentInput = {
 
 async function invoke(functionName: string, body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke(functionName, { body });
-  if (error) throw error;
+  if (error) throwRpcError(error);
   if (data?.error) throw new Error(data.message || data.error);
   return data;
 }
@@ -40,7 +63,7 @@ export async function createClientWithProperty(params: {
     p_country_code: 'US',
     ...params,
   });
-  if (error) throw error;
+  if (error) throwRpcError(error);
   return data as { ok: boolean; client: any; property: any };
 }
 
@@ -112,7 +135,7 @@ export async function commitTurnListImport(companyId: string, importId: string) 
     p_company_id: companyId,
     p_import_id: importId,
   });
-  if (error) throw error;
+  if (error) throwRpcError(error);
   return data as { ok: boolean; pending_count: number; needs_review_count: number };
 }
 
@@ -123,7 +146,7 @@ export async function correctTurnListItem(companyId: string, itemId: string, bui
     p_building_label: buildingLabel,
     p_unit_number: unitNumber,
   });
-  if (error) throw error;
+  if (error) throwRpcError(error);
   return data;
 }
 
@@ -133,6 +156,6 @@ export async function markTurnListItemProcessed(companyId: string, itemId: strin
     p_item_id: itemId,
     p_session_id: sessionId,
   });
-  if (error) throw error;
+  if (error) throwRpcError(error);
   return data;
 }
