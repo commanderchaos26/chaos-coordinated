@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
 import { TextEntryModal } from '../../src/components/TextEntryModal';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
@@ -8,6 +9,7 @@ import { respondToAssignment, transitionAssignment } from '../../src/lib/dispatc
 import { formatStatus } from '../../src/lib/employeeData';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
+import { uploadCompletionPhoto } from '../../src/lib/workEvidence';
 import { colors, spacing } from '../../src/theme';
 
 export default function TaskDetailScreen() {
@@ -18,12 +20,10 @@ export default function TaskDetailScreen() {
   const [workOrder, setWorkOrder] = useState<any>(null);
   const [assignment, setAssignment] = useState<any>(null);
   const [processing, setProcessing] = useState(false);
-  const [reasonModal, setReasonModal] = useState<{
-    action: 'decline' | 'submit';
-    title: string;
-    message: string;
-    fallback: string;
-  } | null>(null);
+  const [reasonModal, setReasonModal] = useState<{ title: string; message: string; fallback: string } | null>(null);
+  const [completionOpen, setCompletionOpen] = useState(false);
+  const [completionNote, setCompletionNote] = useState('Submitted from mobile');
+  const [completionPhotos, setCompletionPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -41,7 +41,6 @@ export default function TaskDetailScreen() {
           .maybeSingle();
 
         if (assignmentResult.error) throw assignmentResult.error;
-
         const exactAssignment = assignmentResult.data;
         if (!exactAssignment) {
           setAssignment(null);
@@ -55,7 +54,6 @@ export default function TaskDetailScreen() {
           .eq('company_id', current.companyId)
           .eq('id', exactAssignment.work_order_id)
           .maybeSingle();
-
         if (workOrderResult.error) throw workOrderResult.error;
 
         setAssignment(exactAssignment);
@@ -70,19 +68,8 @@ export default function TaskDetailScreen() {
       }
 
       const [workOrderResult, assignmentResult] = await Promise.all([
-        supabase
-          .from('work_orders')
-          .select('*')
-          .eq('company_id', current.companyId)
-          .eq('id', id)
-          .maybeSingle(),
-        supabase
-          .from('assignments')
-          .select('*')
-          .eq('company_id', current.companyId)
-          .eq('work_order_id', id)
-          .order('created_at', { ascending: false })
-          .limit(1),
+        supabase.from('work_orders').select('*').eq('company_id', current.companyId).eq('id', id).maybeSingle(),
+        supabase.from('assignments').select('*').eq('company_id', current.companyId).eq('work_order_id', id).order('created_at', { ascending: false }).limit(1),
       ]);
 
       if (workOrderResult.error) throw workOrderResult.error;
@@ -99,16 +86,12 @@ export default function TaskDetailScreen() {
 
   useEffect(() => { void load(); }, [id, assignmentId]);
 
-  const handleAction = async (action: 'accept' | 'decline' | 'start' | 'pause' | 'resume' | 'submit', options?: { reason?: string }) => {
+  const handleAction = async (action: 'accept' | 'decline' | 'start' | 'pause' | 'resume', options?: { reason?: string }) => {
     if (!membership || !assignment || processing) return;
     setProcessing(true);
     try {
       if (action === 'accept' || action === 'decline') {
         const reason = action === 'decline' ? (options?.reason || 'No reason provided') : null;
-        if (action === 'decline' && !reason) {
-          Alert.alert('Reason required', 'A decline reason is required.');
-          return;
-        }
         await respondToAssignment({
           p_company_id: membership.companyId,
           p_assignment_id: assignment.id,
@@ -116,11 +99,10 @@ export default function TaskDetailScreen() {
           p_decline_reason: action === 'decline' ? reason : null,
         });
       } else {
-        const mappedAction = action === 'resume' ? 'start' : action;
         await transitionAssignment({
           p_company_id: membership.companyId,
           p_assignment_id: assignment.id,
-          p_action: mappedAction as any,
+          p_action: action === 'resume' ? 'start' : action,
           p_reason: options?.reason || null,
         });
       }
@@ -133,8 +115,68 @@ export default function TaskDetailScreen() {
     }
   };
 
-  const requestReason = (title: string, message: string, fallback: string, action: 'decline' | 'submit') => {
-    setReasonModal({ title, message, fallback, action });
+  const takeCompletionPhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Camera permission required', 'Allow camera access to photograph the completed work.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        setCompletionPhotos((current) => [...current, result.assets[0]]);
+      }
+    } catch (cause) {
+      Alert.alert('Camera unavailable', cause instanceof Error ? cause.message : 'Could not open the camera.');
+    }
+  };
+
+  const submitCompletion = async () => {
+    if (!membership || !assignment || !workOrder || processing) return;
+    setProcessing(true);
+    try {
+      for (const photo of completionPhotos) {
+        await uploadCompletionPhoto({
+          companyId: membership.companyId,
+          assignmentId: assignment.id,
+          workOrderId: workOrder.id,
+          uri: photo.uri,
+          mimeType: photo.mimeType,
+          byteSize: photo.fileSize,
+        });
+      }
+
+      await transitionAssignment({
+        p_company_id: membership.companyId,
+        p_assignment_id: assignment.id,
+        p_action: 'submit',
+        p_reason: completionNote.trim() || 'Submitted from mobile',
+      });
+
+      setCompletionOpen(false);
+      setCompletionPhotos([]);
+      setCompletionNote('Submitted from mobile');
+      await load();
+      Alert.alert(
+        'Work submitted',
+        completionPhotos.length
+          ? `Submitted with ${completionPhotos.length} completion photo${completionPhotos.length === 1 ? '' : 's'}.`
+          : 'Work submitted for verification.',
+      );
+    } catch (cause) {
+      Alert.alert('Could not submit work', cause instanceof Error ? cause.message : 'The work was not submitted.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openCompletion = () => {
+    setCompletionNote('Submitted from mobile');
+    setCompletionPhotos([]);
+    setCompletionOpen(true);
   };
 
   if (loading) return <LoadingScreen label="Loading task..." />;
@@ -149,19 +191,82 @@ export default function TaskDetailScreen() {
         title={reasonModal?.title ?? ''}
         message={reasonModal?.message}
         initialValue={reasonModal?.fallback ?? ''}
-        confirmLabel={reasonModal?.action === 'decline' ? 'Decline' : 'Submit'}
-        required={reasonModal?.action === 'decline'}
+        confirmLabel="Decline"
+        required
         loading={processing}
         onCancel={() => setReasonModal(null)}
         onConfirm={async (value) => {
           const current = reasonModal;
           if (!current) return;
           setReasonModal(null);
-          await handleAction(current.action, {
-            reason: value || current.fallback,
-          });
+          await handleAction('decline', { reason: value || current.fallback });
         }}
       />
+
+      <Modal visible={completionOpen} transparent animationType="slide" onRequestClose={() => !processing && setCompletionOpen(false)}>
+        <View style={styles.modalShade}>
+          <View style={styles.completionModal}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalEyebrow}>COMPLETION EVIDENCE</Text>
+                <Text style={styles.modalTitle}>Submit finished work</Text>
+              </View>
+              <Pressable disabled={processing} onPress={() => setCompletionOpen(false)} style={styles.closeButton}>
+                <Icon name="close" color={colors.text} size={22} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.modalCopy}>Take photos of the finished work before sending it to verification. You can attach more than one photo.</Text>
+
+            <Pressable disabled={processing} onPress={() => void takeCompletionPhoto()} style={styles.cameraButton}>
+              <Icon name="camera-outline" color={colors.background} size={22} />
+              <Text style={styles.cameraText}>Open camera & take photo</Text>
+            </Pressable>
+
+            {completionPhotos.length ? (
+              <View style={styles.photoGrid}>
+                {completionPhotos.map((photo, index) => (
+                  <View key={`${photo.uri}-${index}`} style={styles.photoWrap}>
+                    <Image source={{ uri: photo.uri }} style={styles.photo} />
+                    <Pressable
+                      disabled={processing}
+                      onPress={() => setCompletionPhotos((current) => current.filter((_, i) => i !== index))}
+                      style={styles.removePhoto}
+                    >
+                      <Icon name="close-circle" color={colors.text} size={22} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.photoEmpty}>
+                <Icon name="images-outline" color={colors.subtle} size={24} />
+                <Text style={styles.photoEmptyText}>No completion photos attached yet.</Text>
+              </View>
+            )}
+
+            <Text style={styles.fieldLabel}>Submission note</Text>
+            <TextInput
+              value={completionNote}
+              onChangeText={setCompletionNote}
+              multiline
+              placeholder="Describe what was completed."
+              placeholderTextColor={colors.subtle}
+              style={styles.noteInput}
+            />
+
+            <View style={styles.modalActions}>
+              <Pressable disabled={processing} onPress={() => setCompletionOpen(false)} style={styles.secondary}>
+                <Text style={styles.secondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable disabled={processing} onPress={() => void submitCompletion()} style={[styles.primary, processing && styles.disabled]}>
+                <Text style={styles.primaryText}>{processing ? 'Uploading & submitting…' : 'Submit for verification'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.topbar}>
         <Pressable onPress={() => router.back()} style={styles.back}>
           <Icon name="arrow-back" color={colors.text} size={21} />
@@ -175,7 +280,7 @@ export default function TaskDetailScreen() {
         <Card style={styles.card}>
           <Text style={styles.heading}>{workOrder.title}</Text>
           <View style={styles.metaRow}>
-            <Badge label={workOrder.priority || 'normal'} tone={['urgent', 'high'].includes((workOrder.priority || '').toLowerCase()) ? 'red' : 'amber'} />
+            <Badge label={workOrder.priority || 'normal'} tone={['urgent', 'high', 'emergency'].includes((workOrder.priority || '').toLowerCase()) ? 'red' : 'amber'} />
             <Badge label={formatStatus(workOrder.status)} tone={workOrder.status === 'completed' ? 'teal' : 'blue'} />
           </View>
           <Text style={styles.metaText}>Status: {formatStatus(workOrder.status)}</Text>
@@ -198,7 +303,7 @@ export default function TaskDetailScreen() {
           {status === 'offered' && (
             <View style={styles.buttonRow}>
               <Pressable onPress={() => void handleAction('accept')} style={styles.primary}><Text style={styles.primaryText}>Accept</Text></Pressable>
-              <Pressable onPress={() => requestReason('Decline assignment', 'Please provide a reason.', 'No reason provided', 'decline')} style={styles.secondary}><Text style={styles.secondaryText}>Decline</Text></Pressable>
+              <Pressable onPress={() => setReasonModal({ title: 'Decline assignment', message: 'Please provide a reason.', fallback: 'No reason provided' })} style={styles.secondary}><Text style={styles.secondaryText}>Decline</Text></Pressable>
             </View>
           )}
 
@@ -208,7 +313,8 @@ export default function TaskDetailScreen() {
                 <Text style={styles.primaryText}>{status === 'paused' ? 'Resume' : 'Start'}</Text>
               </Pressable>
               {status !== 'paused' && (
-                <Pressable onPress={() => requestReason('Submit work', 'Add a submission note.', 'Submitted from mobile', 'submit')} style={styles.secondary}>
+                <Pressable onPress={openCompletion} style={styles.secondary}>
+                  <Icon name="camera-outline" color={colors.text} size={18} />
                   <Text style={styles.secondaryText}>Submit work</Text>
                 </Pressable>
               )}
@@ -218,11 +324,14 @@ export default function TaskDetailScreen() {
           {status === 'active' && (
             <View style={styles.buttonRow}>
               <Pressable onPress={() => void handleAction('pause')} style={styles.secondary}><Text style={styles.secondaryText}>Pause</Text></Pressable>
-              <Pressable onPress={() => requestReason('Submit work', 'Add a note.', 'Submitted from mobile', 'submit')} style={styles.primary}><Text style={styles.primaryText}>Submit work</Text></Pressable>
+              <Pressable onPress={openCompletion} style={styles.primary}>
+                <Icon name="camera-outline" color={colors.background} size={18} />
+                <Text style={styles.primaryText}>Submit work</Text>
+              </Pressable>
             </View>
           )}
 
-          {status === 'submitted' && <Text style={styles.metaText}>Awaiting verification.</Text>}
+          {status === 'submitted' && <Text style={styles.metaText}>Awaiting verification. Completion evidence is stored with this work order.</Text>}
         </Card>
       )}
     </ScrollView>
@@ -254,11 +363,30 @@ const styles = StyleSheet.create({
   metaText: { color: colors.muted, fontSize: 13, marginTop: spacing.sm },
   description: { color: colors.muted, lineHeight: 20, marginTop: spacing.md },
   buttonRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  primary: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 12, flex: 1, justifyContent: 'center', minHeight: 48 },
-  primaryText: { color: colors.background, fontWeight: '800' },
-  secondary: { alignItems: 'center', backgroundColor: colors.surfaceSoft, borderRadius: 12, flex: 1, justifyContent: 'center', minHeight: 48 },
-  secondaryText: { color: colors.text, fontWeight: '800' },
+  primary: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'center', minHeight: 48, paddingHorizontal: spacing.md },
+  primaryText: { color: colors.background, fontWeight: '800', textAlign: 'center' },
+  secondary: { alignItems: 'center', backgroundColor: colors.surfaceSoft, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'center', minHeight: 48, paddingHorizontal: spacing.md },
+  secondaryText: { color: colors.text, fontWeight: '800', textAlign: 'center' },
+  disabled: { opacity: 0.55 },
   error: { color: colors.red, fontSize: 12, marginTop: spacing.md },
+  modalShade: { backgroundColor: 'rgba(0,0,0,0.72)', flex: 1, justifyContent: 'flex-end' },
+  completionModal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%', padding: spacing.lg, paddingBottom: 36 },
+  modalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  modalEyebrow: { color: colors.teal, fontSize: 10, fontWeight: '900', letterSpacing: 1.1 },
+  modalTitle: { color: colors.text, fontSize: 22, fontWeight: '900', marginTop: 3 },
+  closeButton: { alignItems: 'center', backgroundColor: colors.surfaceSoft, borderRadius: 999, height: 42, justifyContent: 'center', width: 42 },
+  modalCopy: { color: colors.muted, fontSize: 13, lineHeight: 19, marginTop: spacing.md },
+  cameraButton: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 14, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', marginTop: spacing.md, minHeight: 54 },
+  cameraText: { color: colors.background, fontSize: 14, fontWeight: '900' },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
+  photoWrap: { borderRadius: 12, height: 92, overflow: 'hidden', position: 'relative', width: 92 },
+  photo: { height: '100%', width: '100%' },
+  removePhoto: { backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 999, position: 'absolute', right: 4, top: 4 },
+  photoEmpty: { alignItems: 'center', borderColor: colors.border, borderRadius: 14, borderStyle: 'dashed', borderWidth: 1, flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, padding: spacing.md },
+  photoEmptyText: { color: colors.subtle, flex: 1, fontSize: 12 },
+  fieldLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginTop: spacing.lg, textTransform: 'uppercase' },
+  noteInput: { backgroundColor: colors.background, borderColor: colors.border, borderRadius: 14, borderWidth: 1, color: colors.text, marginTop: spacing.sm, minHeight: 90, padding: spacing.md, textAlignVertical: 'top' },
+  modalActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   message: { alignItems: 'center', backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 18, borderWidth: 1, flex: 1, justifyContent: 'center', margin: spacing.lg, padding: spacing.xl },
   messageTitle: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: spacing.md },
   messageText: { color: colors.muted, fontSize: 13, marginTop: spacing.sm, textAlign: 'center' },
