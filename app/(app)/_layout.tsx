@@ -28,6 +28,10 @@ export default function AppLayout() {
       <Tabs.Screen name="ai-access" options={{ href: null, title: 'AI Walkthrough Access' }} />
       <Tabs.Screen name="time-clock" options={{ href: null, title: 'Time Clock' }} />
       <Tabs.Screen name="payroll" options={{ href: null, title: 'Payroll & Timecards' }} />
+      <Tabs.Screen name="clients" options={{ href: null, title: 'Client Portal' }} />
+      <Tabs.Screen name="new-client" options={{ href: null, title: 'New Client' }} />
+      <Tabs.Screen name="client-detail" options={{ href: null, title: 'Client Detail' }} />
+      <Tabs.Screen name="turn-list-import" options={{ href: null, title: 'Turn List Import' }} />
     </Tabs>
   );
 }
