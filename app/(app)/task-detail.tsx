@@ -22,7 +22,7 @@ export default function TaskDetailScreen() {
   const [processing, setProcessing] = useState(false);
   const [reasonModal, setReasonModal] = useState<{ title: string; message: string; fallback: string } | null>(null);
   const [completionOpen, setCompletionOpen] = useState(false);
-  const [completionNote, setCompletionNote] = useState('Submitted from mobile');
+  const [completionNote, setCompletionNote] = useState('Completed from mobile');
   const [completionPhotos, setCompletionPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
 
   const load = async () => {
@@ -166,18 +166,18 @@ export default function TaskDetailScreen() {
         p_company_id: membership.companyId,
         p_assignment_id: assignment.id,
         p_action: 'submit',
-        p_reason: completionNote.trim() || 'Submitted from mobile',
+        p_reason: completionNote.trim() || 'Completed from mobile',
       });
 
       setCompletionOpen(false);
       setCompletionPhotos([]);
-      setCompletionNote('Submitted from mobile');
+      setCompletionNote('Completed from mobile');
       await load();
       Alert.alert(
-        'Work submitted',
+        'Work completed',
         completionPhotos.length
-          ? `Submitted with ${completionPhotos.length} completion photo${completionPhotos.length === 1 ? '' : 's'}.`
-          : 'Work submitted for verification.',
+          ? `Completed with ${completionPhotos.length} completion photo${completionPhotos.length === 1 ? '' : 's'}. Downstream work is now eligible when its dependencies are satisfied.`
+          : 'Work completed. Downstream work is now eligible when its dependencies are satisfied.',
       );
     } catch (cause) {
       Alert.alert('Could not submit work', cause instanceof Error ? cause.message : 'The work was not submitted.');
@@ -187,7 +187,7 @@ export default function TaskDetailScreen() {
   };
 
   const openCompletion = () => {
-    setCompletionNote('Submitted from mobile');
+    setCompletionNote('Completed from mobile');
     setCompletionPhotos([]);
     setCompletionOpen(true);
   };
@@ -222,14 +222,14 @@ export default function TaskDetailScreen() {
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalEyebrow}>COMPLETION EVIDENCE</Text>
-                <Text style={styles.modalTitle}>Submit finished work</Text>
+                <Text style={styles.modalTitle}>Complete finished work</Text>
               </View>
               <Pressable disabled={processing} onPress={() => setCompletionOpen(false)} style={styles.closeButton}>
                 <Icon name="close" color={colors.text} size={22} />
               </Pressable>
             </View>
 
-            <Text style={styles.modalCopy}>Take photos of the finished work before sending it to verification. You can attach more than one photo.</Text>
+            <Text style={styles.modalCopy}>Take photos of the finished work before completing it. Completion releases dependent work automatically. The only mandatory approval is the final unit inspection after the final clean.</Text>
 
             <Pressable disabled={processing} onPress={() => void takeCompletionPhoto()} style={styles.cameraButton}>
               <Icon name="camera-outline" color={colors.background} size={22} />
@@ -273,7 +273,7 @@ export default function TaskDetailScreen() {
                 <Text style={styles.secondaryText}>Cancel</Text>
               </Pressable>
               <Pressable disabled={processing} onPress={() => void submitCompletion()} style={[styles.primary, processing && styles.disabled]}>
-                <Text style={styles.primaryText}>{processing ? 'Uploading & submitting…' : 'Submit for verification'}</Text>
+                <Text style={styles.primaryText}>{processing ? 'Uploading & completing…' : 'Complete work'}</Text>
               </Pressable>
             </View>
           </View>
@@ -350,7 +350,7 @@ export default function TaskDetailScreen() {
             </View>
           )}
 
-          {status === 'submitted' && <Text style={styles.metaText}>Awaiting verification. Completion evidence is stored with this work order.</Text>}
+          {status === 'submitted' && <Text style={styles.metaText}>Legacy submission from the previous workflow. Management can complete this item once; new submissions complete automatically.</Text>}
         </Card>
       )}
     </ScrollView>
