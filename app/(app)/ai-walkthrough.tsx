@@ -74,7 +74,8 @@ export default function AiWalkthroughScreen() {
         setTurnQueue(loadedQueue);
 
         const recovery = await loadAiWalkthroughRecovery(current.companyId, current.employeeId);
-        if (recovery && (!linkedTurnoverId || recovery.session.turnover_id === linkedTurnoverId)) {
+        const recoveryMatchesContext = Boolean(recovery && (!linkedTurnoverId || recovery.session.turnover_id === linkedTurnoverId));
+        if (recovery && recoveryMatchesContext) {
           setSession(recovery.session);
           setChunks(recovery.chunks as Chunk[]);
           setResult(recovery.result);
@@ -107,7 +108,7 @@ export default function AiWalkthroughScreen() {
           }
         }
 
-        if (linkedTurnoverId && !recovery) {
+        if (linkedTurnoverId && !recoveryMatchesContext) {
           const { data: linked, error: linkedError } = await supabase
             .from('turnovers')
             .select('property_id,building_id,unit_id')
