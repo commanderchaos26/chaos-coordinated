@@ -20,6 +20,8 @@ function translateKnownError(message: string): string {
   if (normalized.includes('override_reason_required')) return 'An override reason is required when assigning during an availability conflict.';
   if (normalized.includes('invalid_assignment_transition')) return 'That assignment update is not valid for the current status.';
   if (normalized.includes('decline_reason_required')) return 'A reason is required when declining an assignment.';
+  if (normalized.includes('work_order_needs_review')) return 'This AI-created work order must be reviewed and assigned to a department before it can be dispatched.';
+  if (normalized.includes('work_order_dependency_incomplete')) return 'This task cannot start until its prerequisite work order is completed.';
   if (normalized.includes('insufficient_permission')) return 'You do not have permission to perform that operation.';
   return message;
 }
@@ -49,7 +51,16 @@ export async function runDispatchRpc<T = unknown>(rpcName: string, params: RpcPa
           timeoutId = setTimeout(() => reject(new Error('The dispatch request timed out. Please try again.')), COMMAND_TIMEOUT_MS);
         }),
       ]);
-      return response as T;
+
+      const { data, error } = response as { data: unknown; error: unknown };
+      if (error) throw error;
+
+      if (data && typeof data === 'object' && 'ok' in data && (data as { ok?: unknown }).ok === false) {
+        const payload = data as { message?: unknown; error?: unknown };
+        throw new Error(readableMessage(payload.message ?? payload.error ?? data));
+      }
+
+      return data as T;
     } catch (error) {
       throw new Error(await extractRpcError(error));
     } finally {
