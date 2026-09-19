@@ -54,7 +54,22 @@ export default function PayrollScreen() {
       if (exportsError) throw exportsError;
 
       const exports = (exportsData ?? []) as PayrollExport[];
-      const employeeIds = [...new Set(exports.map((item) => item.employee_id))];
+      const exportEmployeeIds = [...new Set(exports.map((item) => item.employee_id))];
+      const activeLinked = new Set<string>();
+
+      if (exportEmployeeIds.length) {
+        const { data: links, error: linksError } = await supabase
+          .from('employee_account_links')
+          .select('employee_id')
+          .eq('company_id', current.companyId)
+          .eq('status', 'active')
+          .in('employee_id', exportEmployeeIds);
+        if (linksError) throw linksError;
+        for (const link of links ?? []) activeLinked.add(link.employee_id);
+      }
+
+      const visibleExports = exports.filter((item) => activeLinked.has(item.employee_id));
+      const employeeIds = [...new Set(visibleExports.map((item) => item.employee_id))];
       const employeeMap = new Map<string,string>();
 
       if (employeeIds.length) {
@@ -66,7 +81,7 @@ export default function PayrollScreen() {
         for (const employee of employees ?? []) employeeMap.set(employee.id, employee.display_name);
       }
 
-      setRows(exports.map((item) => ({ ...item, employee_name: employeeMap.get(item.employee_id) ?? item.file_name.replace(/\.txt$/i, '') })));
+      setRows(visibleExports.map((item) => ({ ...item, employee_name: employeeMap.get(item.employee_id) ?? item.file_name.replace(/\.txt$/i, '') })));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load payroll exports.');
     } finally {
@@ -95,7 +110,7 @@ export default function PayrollScreen() {
     try {
       const result = await generatePreviousWeekPayroll(membership.companyId);
       await load();
-      Alert.alert('Payroll exports refreshed', `${result.export_count} employee file${result.export_count === 1 ? '' : 's'} generated for the previous completed Monday–Friday week.`);
+      Alert.alert('Payroll exports refreshed', 'The previous completed Monday–Friday payroll files were regenerated.');
     } catch (cause) {
       Alert.alert('Payroll generation failed', cause instanceof Error ? cause.message : 'Could not generate payroll exports.');
     } finally {
