@@ -63,6 +63,20 @@ Deno.serve(async (req: Request) => {
     const management = (roles ?? []).some((row: any) => ["owner","operations_manager","supervisor","dispatcher"].includes(row.role));
     if (assignment.employee_id !== link.employee_id && !management) return json({ error: "insufficient_permission" }, 403);
 
+    if (action === "prepare_upload" && !["active", "paused"].includes(String(assignment.status))) {
+      return json({
+        error: "assignment_not_ready_for_completion_evidence",
+        message: "Start this assignment before adding completion evidence.",
+      }, 409);
+    }
+
+    if (action === "register_upload" && !["active", "paused", "submitted"].includes(String(assignment.status))) {
+      return json({
+        error: "assignment_not_ready_for_completion_evidence",
+        message: "This assignment is not in a state that can accept completion evidence.",
+      }, 409);
+    }
+
     if (action === "prepare_upload") {
       const mimeType = String(body?.mime_type ?? "image/jpeg").toLowerCase();
       if (!allowedMime.has(mimeType)) return json({ error: "unsupported_media_type" }, 400);

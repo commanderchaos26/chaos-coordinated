@@ -138,6 +138,19 @@ export default function TaskDetailScreen() {
     if (!membership || !assignment || !workOrder || processing) return;
     setProcessing(true);
     try {
+      const { data: currentAssignment, error: assignmentError } = await supabase
+        .from('assignments')
+        .select('status')
+        .eq('company_id', membership.companyId)
+        .eq('id', assignment.id)
+        .maybeSingle();
+      if (assignmentError) throw assignmentError;
+      if (!currentAssignment) throw new Error('Assignment not found.');
+      const currentStatus = String(currentAssignment.status ?? '').toLowerCase();
+      if (!['active', 'paused'].includes(currentStatus)) {
+        throw new Error('Start this assignment before submitting completed work.');
+      }
+
       for (const photo of completionPhotos) {
         await uploadCompletionPhoto({
           companyId: membership.companyId,
@@ -307,17 +320,23 @@ export default function TaskDetailScreen() {
             </View>
           )}
 
-          {['accepted', 'paused'].includes(status) && (
+          {status === 'accepted' && (
             <View style={styles.buttonRow}>
-              <Pressable onPress={() => void handleAction(status === 'paused' ? 'resume' : 'start')} style={styles.primary}>
-                <Text style={styles.primaryText}>{status === 'paused' ? 'Resume' : 'Start'}</Text>
+              <Pressable onPress={() => void handleAction('start')} style={styles.primary}>
+                <Text style={styles.primaryText}>Start</Text>
               </Pressable>
-              {status !== 'paused' && (
-                <Pressable onPress={openCompletion} style={styles.secondary}>
-                  <Icon name="camera-outline" color={colors.text} size={18} />
-                  <Text style={styles.secondaryText}>Submit work</Text>
-                </Pressable>
-              )}
+            </View>
+          )}
+
+          {status === 'paused' && (
+            <View style={styles.buttonRow}>
+              <Pressable onPress={() => void handleAction('resume')} style={styles.secondary}>
+                <Text style={styles.secondaryText}>Resume</Text>
+              </Pressable>
+              <Pressable onPress={openCompletion} style={styles.primary}>
+                <Icon name="camera-outline" color={colors.background} size={18} />
+                <Text style={styles.primaryText}>Submit work</Text>
+              </Pressable>
             </View>
           )}
 
