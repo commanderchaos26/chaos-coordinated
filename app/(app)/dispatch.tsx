@@ -24,6 +24,8 @@ type WorkOrder = {
 };
 
 type AssignmentRow = { id: string; employee_id: string; work_order_id: string; status: string };
+const liveAssignmentStatuses = new Set(['offered', 'accepted', 'active', 'paused', 'submitted']);
+const isLiveAssignment = (status: string | null | undefined) => liveAssignmentStatuses.has((status ?? '').toLowerCase());
 const canDispatch = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner', 'operations_manager', 'supervisor', 'dispatcher'].includes(role)));
 
 export default function DispatchScreen() {
@@ -81,6 +83,14 @@ export default function DispatchScreen() {
   useEffect(() => { void load(); }, []);
 
   const selectedOrder = useMemo(() => workOrders.find((order) => order.id === selectedOrderId) ?? null, [selectedOrderId, workOrders]);
+  const currentAssignment = useMemo(
+    () => assignments.find((row) => row.work_order_id === selectedOrderId && isLiveAssignment(row.status)) ?? null,
+    [assignments, selectedOrderId],
+  );
+  const currentAssigneeName = useMemo(
+    () => directory?.employees.find((employee) => employee.id === currentAssignment?.employee_id)?.display_name ?? null,
+    [currentAssignment, directory],
+  );
 
   const candidates = useMemo(() => {
     if (!directory || !selectedOrder) return [];
@@ -89,7 +99,7 @@ export default function DispatchScreen() {
       const crewMembership = directory.crewMembers.find((row) => row.employee_id === employee.id && row.active);
       const crew = crewMembership ? directory.crews.find((item) => item.id === crewMembership.crew_id) : null;
       const skills = directory.employeeSkills.filter((row) => row.employee_id === employee.id).map((row) => directory.skills.find((skill) => skill.id === row.skill_id)?.name).filter(Boolean) as string[];
-      const assignmentCount = assignments.filter((row) => row.employee_id === employee.id && !['completed', 'cancelled', 'closed'].includes((row.status ?? '').toLowerCase())).length;
+      const assignmentCount = assignments.filter((row) => row.employee_id === employee.id && isLiveAssignment(row.status)).length;
       return { employee, department, crew, skills, assignmentCount };
     }).filter((item) => item.employee.employment_status?.toLowerCase() !== 'inactive');
   }, [assignments, directory, selectedOrder]);
@@ -147,7 +157,7 @@ export default function DispatchScreen() {
       {error && <Feedback tone="error" message={error} />}
       <Text style={styles.sectionTitle}>Open work orders</Text>
       {workOrders.length ? <View style={styles.orderList}>{workOrders.map((order) => <Pressable key={order.id} onPress={() => setSelectedOrderId(order.id)} style={[styles.orderCard, selectedOrderId === order.id && styles.orderCardSelected]}><View style={styles.orderHeader}><View style={styles.orderBadges}><Badge label={order.priority || 'normal'} tone={['urgent', 'high'].includes((order.priority || '').toLowerCase()) ? 'red' : 'amber'} />{order.needs_review ? <Badge label="Needs review" tone="amber" /> : null}</View><Text style={styles.status}>{formatStatus(order.status)}</Text></View><Text style={styles.orderTitle}>{order.title}</Text><Text style={styles.orderMeta}>{order.due_at ? `Due ${new Date(order.due_at).toLocaleString()}` : 'No due date'}</Text></Pressable>)}</View> : <EmptyState icon="construct-outline" title="No open work orders" message="The current queue is clear. New work will appear here automatically." />}
-      {selectedOrder && <View style={styles.assignmentPanel}><Text style={styles.sectionTitle}>{selectedOrder.title}</Text><View style={styles.assignmentMeta}><Text style={styles.metaText}>Priority: {selectedOrder.priority}</Text><Text style={styles.metaText}>Status: {formatStatus(selectedOrder.status)}</Text></View><Text style={styles.metaText}>Current assignment: {assignments.some((row) => row.work_order_id === selectedOrder.id) ? 'Assigned' : 'Unassigned'}</Text>
+      {selectedOrder && <View style={styles.assignmentPanel}><Text style={styles.sectionTitle}>{selectedOrder.title}</Text><View style={styles.assignmentMeta}><Text style={styles.metaText}>Priority: {selectedOrder.priority}</Text><Text style={styles.metaText}>Status: {formatStatus(selectedOrder.status)}</Text></View><Text style={styles.metaText}>Current assignment: {currentAssigneeName ?? 'Unassigned'}</Text>
         {selectedOrder.needs_review ? <Card style={styles.reviewCard}>
           <View style={styles.reviewHeader}><Icon name="alert-circle-outline" color={colors.amber} size={20}/><Text style={styles.reviewTitle}>Resolve AI review before dispatch</Text></View>
           <Text style={styles.reviewText}>{selectedOrder.review_reason || 'This AI-created work order needs management review before it can be assigned or started.'}</Text>
@@ -177,26 +187,53 @@ export default function DispatchScreen() {
     if (!membership || !selectedOrder) return;
     const employee = directory?.employees.find((item) => item.id === employeeId);
     if (!employee) return;
-    Alert.alert('Assign work order', `Assign ${employee.display_name} to ${selectedOrder.title}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Assign', onPress: async () => {
-        try {
-          await assignWorkOrder({ p_company_id: membership.companyId, p_work_order_id: selectedOrder.id, p_employee_id: employeeId, p_scheduled_start: null, p_scheduled_end: null, p_override_availability: false, p_override_reason: null });
-          await load();
-          Alert.alert('Assignment created', `${employee.display_name} was assigned to the work order.`);
-        } catch (cause) {
-          const message = cause instanceof Error ? cause.message : 'Could not assign work order.';
-          if (message.toLowerCase().includes('employee_unavailable')) {
-            setOverrideRequest({
-              employeeId,
-              employeeName: employee.display_name,
+
+    if (currentAssignment?.employee_id === employeeId) {
+      Alert.alert('Already assigned', `${employee.display_name} already owns this work order.`);
+      return;
+    }
+
+    const replacing = Boolean(currentAssignment);
+    const currentName = currentAssigneeName ?? 'the current employee';
+    Alert.alert(
+      replacing ? 'Reassign work order' : 'Assign work order',
+      replacing
+        ? `Move ${selectedOrder.title} from ${currentName} to ${employee.display_name}?`
+        : `Assign ${employee.display_name} to ${selectedOrder.title}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: replacing ? 'Reassign' : 'Assign', onPress: async () => {
+          try {
+            await assignWorkOrder({
+              p_company_id: membership.companyId,
+              p_work_order_id: selectedOrder.id,
+              p_employee_id: employeeId,
+              p_scheduled_start: null,
+              p_scheduled_end: null,
+              p_override_availability: false,
+              p_override_reason: null,
             });
-            return;
+            await load();
+            Alert.alert(
+              replacing ? 'Assignment moved' : 'Assignment created',
+              replacing
+                ? `${employee.display_name} now owns the work order. The previous live assignment was cancelled.`
+                : `${employee.display_name} was assigned to the work order.`,
+            );
+          } catch (cause) {
+            const message = cause instanceof Error ? cause.message : 'Could not assign work order.';
+            if (message.toLowerCase().includes('employee_unavailable')) {
+              setOverrideRequest({
+                employeeId,
+                employeeName: employee.display_name,
+              });
+              return;
+            }
+            Alert.alert('Assignment failed', message);
           }
-          Alert.alert('Assignment failed', message);
-        }
-      } },
-    ]);
+        } },
+      ],
+    );
   }
 }
 
