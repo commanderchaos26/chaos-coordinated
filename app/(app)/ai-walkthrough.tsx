@@ -6,6 +6,7 @@ import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { appendAiWalkthroughChunk, finalizeAiWalkthrough, startAiWalkthrough, type AiWalkthroughFinalizeResult, type AiWalkthroughSession } from '../../src/lib/aiWalkthroughCommands';
 import { loadMyFeaturePermissions } from '../../src/lib/featurePermissionCommands';
+import { markTurnListItemProcessed } from '../../src/lib/clientPortalCommands';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
 import { colors, spacing, typography } from '../../src/theme';
@@ -16,6 +17,7 @@ type Building = { id: string; property_id: string; name: string };
 type Unit = { id: string; building_id: string; unit_number: string };
 type WorkSite = { id: string; property_id: string; name: string };
 type Chunk = { id: string; sequence_no: number; transcript_text: string; source: string; captured_at: string };
+type TurnQueueItem = { id: string; property_id: string; building_id: string; unit_id: string; turnover_id: string | null; status: string; source_page: number | null };
 
 export default function AiWalkthroughScreen() {
   const { turnoverId } = useLocalSearchParams<{ turnoverId?: string }>();
@@ -26,6 +28,9 @@ export default function AiWalkthroughScreen() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [workSites, setWorkSites] = useState<WorkSite[]>([]);
+  const [turnQueue, setTurnQueue] = useState<TurnQueueItem[]>([]);
+  const [selectedTurnItemId, setSelectedTurnItemId] = useState('');
+  const [processedTurnLabel, setProcessedTurnLabel] = useState('');
   const [propertyId, setPropertyId] = useState('');
   const [buildingId, setBuildingId] = useState('');
   const [unitId, setUnitId] = useState('');
@@ -49,13 +54,14 @@ export default function AiWalkthroughScreen() {
         const permissions = await loadMyFeaturePermissions(current.companyId, current.employeeId);
         setAuthorized(permissions.has('ai_walkthrough'));
         if (!permissions.has('ai_walkthrough')) return;
-        const [p, b, u, w] = await Promise.all([
+        const [p, b, u, w, q] = await Promise.all([
           supabase.from('properties').select('id,name').eq('company_id', current.companyId).order('name'),
           supabase.from('buildings').select('id,property_id,name').eq('company_id', current.companyId).order('name'),
           supabase.from('units').select('id,building_id,unit_number').eq('company_id', current.companyId).order('unit_number'),
           supabase.from('work_sites').select('id,property_id,name').eq('company_id', current.companyId).order('name'),
+          supabase.from('turn_list_items').select('id,property_id,building_id,unit_id,turnover_id,status,source_page').eq('company_id', current.companyId).eq('status', 'pending').order('created_at'),
         ]);
-        const failure = [p,b,u,w].find((item) => item.error);
+        const failure = [p,b,u,w,q].find((item) => item.error);
         if (failure?.error) throw failure.error;
         const loadedProperties = (p.data ?? []) as Property[];
         const loadedBuildings = (b.data ?? []) as Building[];
@@ -64,6 +70,7 @@ export default function AiWalkthroughScreen() {
         setBuildings(loadedBuildings);
         setUnits(loadedUnits);
         setWorkSites((w.data ?? []) as WorkSite[]);
+        setTurnQueue((q.data ?? []) as TurnQueueItem[]);
 
         if (linkedTurnoverId) {
           const { data: linked, error: linkedError } = await supabase
@@ -93,16 +100,27 @@ export default function AiWalkthroughScreen() {
   const selectedProperty = properties.find((item) => item.id === propertyId);
   const selectedBuilding = buildings.find((item) => item.id === buildingId);
   const selectedUnit = units.find((item) => item.id === unitId);
+  const selectedTurnItem = turnQueue.find((item) => item.id === selectedTurnItemId) ?? null;
 
   const chooseProperty = (id: string) => {
+    setSelectedTurnItemId('');
     setPropertyId(id);
     setBuildingId('');
     setUnitId('');
   };
 
   const chooseBuilding = (id: string) => {
+    setSelectedTurnItemId('');
     setBuildingId(id);
     setUnitId('');
+  };
+
+  const chooseTurn = (item: TurnQueueItem) => {
+    setSelectedTurnItemId(item.id);
+    setPropertyId(item.property_id);
+    setBuildingId(item.building_id);
+    setUnitId(item.unit_id);
+    setProcessedTurnLabel('');
   };
 
   const begin = async () => {
@@ -116,7 +134,7 @@ export default function AiWalkthroughScreen() {
         p_property_id: propertyId,
         p_building_id: buildingId || null,
         p_unit_id: unitId || null,
-        p_turnover_id: linkedTurnoverId || null,
+        p_turnover_id: selectedTurnItem?.turnover_id || linkedTurnoverId || null,
         p_work_site_id: site?.id ?? null,
       });
       setSession(started.session);
@@ -163,6 +181,16 @@ export default function AiWalkthroughScreen() {
         sessionId: session.id,
         finalizationKey: finalizationKey || Crypto.randomUUID(),
       });
+      if (selectedTurnItem && finalized.issues.length > 0) {
+        try {
+          await markTurnListItemProcessed(membership.companyId, selectedTurnItem.id, session.id);
+          const label = [selectedBuilding?.name ? `Building ${selectedBuilding.name}` : null, selectedUnit ? `Unit ${selectedUnit.unit_number}` : null].filter(Boolean).join(' · ');
+          setProcessedTurnLabel(label);
+          setTurnQueue((current) => current.filter((item) => item.id !== selectedTurnItem.id));
+        } catch (queueError) {
+          Alert.alert('Work orders created', `The work orders were created, but this unit could not be removed from the pending turn queue: ${queueError instanceof Error ? queueError.message : 'Try refreshing the queue.'}`);
+        }
+      }
       setResult(finalized);
       setSession((current) => current ? { ...current, status: 'completed', finalized_at: new Date().toISOString(), ai_summary: finalized.summary ?? null } : current);
     } catch (cause) {
@@ -189,8 +217,24 @@ export default function AiWalkthroughScreen() {
       <Card style={styles.hero}>
         <Text style={styles.heroTitle}>Walk it. Say it. Work orders come out the other side.</Text>
         {linkedTurnoverId ? <Text style={styles.linkedText}>Linked to this unit turnover. Any work orders created here will stay attached to the turnover.</Text> : null}
-        <Text style={styles.heroText}>Choose the location first. The walkthrough keeps the property, building, unit, transcript, and later photos tied together so the AI can create the correct departmental jobs.</Text>
+        <Text style={styles.heroText}>Imported turn lists tell us which apartments to inspect. The walkthrough is where you determine everything needed to make that apartment ready.</Text>
       </Card>
+
+      {!linkedTurnoverId ? <>
+        <Text style={styles.sectionTitle}>Pending Turn List</Text>
+        {turnQueue.length ? turnQueue.map((item) => {
+          const pName = properties.find((p) => p.id === item.property_id)?.name ?? 'Property';
+          const bName = buildings.find((b) => b.id === item.building_id)?.name ?? 'Building';
+          const uName = units.find((u) => u.id === item.unit_id)?.unit_number ?? 'Unit';
+          const selected = selectedTurnItemId === item.id;
+          return <Pressable key={item.id} onPress={() => chooseTurn(item)} style={[styles.queueCard, selected && styles.queueCardActive]}>
+            <View style={styles.queueIcon}><Icon name="home-outline" color={colors.teal} size={20}/></View>
+            <View style={styles.queueCopy}><Text style={styles.queueTitle}>{bName} · Unit {uName}</Text><Text style={styles.queueMeta}>{pName}{item.source_page ? ` · source page ${item.source_page}` : ''}</Text></View>
+            {selected ? <Icon name="checkmark-circle" color={colors.teal} size={22}/> : <Icon name="chevron-forward" color={colors.subtle} size={20}/>}
+          </Pressable>;
+        }) : <EmptyState icon="checkmark-done-outline" title="No pending imported turns" message="New units appear here after management approves a Turn List Import." />}
+        <Text style={styles.manualLabel}>MANUAL LOCATION</Text>
+      </> : null}
       {properties.length ? <>
         <Selector title="Property" items={properties.map((item) => ({ id: item.id, label: item.name }))} selected={propertyId} onSelect={chooseProperty} />
         {propertyId ? <Selector title="Building" optional items={visibleBuildings.map((item) => ({ id: item.id, label: item.name }))} selected={buildingId} onSelect={chooseBuilding} /> : null}
@@ -213,6 +257,8 @@ export default function AiWalkthroughScreen() {
         {issue.review_reason ? <Text style={styles.reviewReason}>{issue.review_reason}</Text> : null}
         {issue.depends_on_issue_keys?.length ? <Text style={styles.dependency}>Depends on: {issue.depends_on_issue_keys.join(', ')}</Text> : null}
       </Card>) : <EmptyState icon="checkmark-circle-outline" title="No work detected" message="The AI did not find an actionable work item in this walkthrough." />}
+      {processedTurnLabel ? <Card style={styles.processedCard}><Icon name="checkmark-done-circle-outline" color={colors.teal} size={22}/><Text style={styles.processedText}>{processedTurnLabel} was removed from the pending turn list after its work orders were created.</Text></Card> : null}
+      {turnQueue.length ? <Pressable onPress={() => { setSession(null); setResult(null); setChunks([]); setObservation(''); setSelectedTurnItemId(''); setPropertyId(''); setBuildingId(''); setUnitId(''); setProcessedTurnLabel(''); }} style={styles.secondary}><Icon name="arrow-forward-circle-outline" color={colors.teal} size={20}/><Text style={styles.secondaryText}>Next pending turn</Text></Pressable> : null}
       <Pressable onPress={() => router.replace('/(app)/work-orders' as never)} style={styles.primary}><Icon name="construct-outline" color={colors.background} size={20} /><Text style={styles.primaryText}>Open work orders</Text></Pressable>
     </> : <>
       <Card style={styles.activeCard}>
@@ -269,6 +315,13 @@ const styles = StyleSheet.create({
   heroTitle: { color: colors.text, fontSize: 19, fontWeight: '900', lineHeight: 26 },
   heroText: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: spacing.sm },
   linkedText: { color: colors.teal, fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: spacing.sm },
+  queueCard: { alignItems: 'center', backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, flexDirection: 'row', gap: spacing.md, padding: spacing.md },
+  queueCardActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal },
+  queueIcon: { alignItems: 'center', backgroundColor: colors.tealDeep, borderRadius: 999, height: 42, justifyContent: 'center', width: 42 },
+  queueCopy: { flex: 1 },
+  queueTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  queueMeta: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  manualLabel: { color: colors.subtle, fontSize: 10, fontWeight: '900', letterSpacing: 1, marginTop: spacing.sm },
   selectorBlock: { gap: spacing.sm },
   selectorTitle: { color: colors.muted, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
@@ -304,6 +357,8 @@ const styles = StyleSheet.create({
   completeIcon: { alignItems: 'center', backgroundColor: colors.background, borderRadius: 999, height: 58, justifyContent: 'center', width: 58 },
   completeTitle: { color: colors.text, fontSize: 19, fontWeight: '900', marginTop: spacing.md },
   completeText: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: spacing.sm, textAlign: 'center' },
+  processedCard: { alignItems: 'center', backgroundColor: colors.tealDeep, flexDirection: 'row', gap: spacing.sm, padding: spacing.md },
+  processedText: { color: colors.text, flex: 1, fontSize: 12, lineHeight: 18 },
   issueCard: { padding: spacing.md },
   issueTop: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm, justifyContent: 'space-between' },
   issueTitle: { color: colors.text, fontSize: 16, fontWeight: '900', marginTop: spacing.md },
