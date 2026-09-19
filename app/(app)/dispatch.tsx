@@ -125,6 +125,8 @@ export default function DispatchScreen() {
 
         setOverrideBusy(true);
         try {
+          const replacing = Boolean(currentAssignment && currentAssignment.employee_id !== overrideRequest.employeeId);
+          const previousName = currentAssigneeName ?? 'the previous employee';
           await assignWorkOrder({
             p_company_id: membership.companyId,
             p_work_order_id: selectedOrder.id,
@@ -139,8 +141,10 @@ export default function DispatchScreen() {
           setOverrideRequest(null);
           await load();
           Alert.alert(
-            'Assignment created',
-            `${employeeName} was assigned with an availability override.`,
+            replacing ? 'Assignment moved' : 'Assignment created',
+            replacing
+              ? `${employeeName} now owns the work order with an availability override. ${previousName}'s live assignment was cancelled.`
+              : `${employeeName} was assigned with an availability override.`,
           );
         } catch (cause) {
           Alert.alert(
