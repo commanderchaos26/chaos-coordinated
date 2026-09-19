@@ -42,6 +42,7 @@ export default function TurnListImportScreen() {
   const [propertyActive, setPropertyActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
   const [editItem, setEditItem] = useState<ItemRow | null>(null);
   const [editBuilding, setEditBuilding] = useState('');
   const [editUnit, setEditUnit] = useState('');
@@ -165,6 +166,22 @@ export default function TurnListImportScreen() {
     });
   };
 
+  const choosePhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      allowsEditing: false,
+    });
+    const asset = !result.canceled ? result.assets?.[0] : null;
+    if (!asset) return;
+    await uploadAsset({
+      uri: asset.uri,
+      name: asset.fileName || `turn-list-${Date.now()}.jpg`,
+      mimeType: asset.mimeType || 'image/jpeg',
+      size: asset.fileSize,
+    });
+  };
+
   const chooseFile = async () => {
     const result = await DocumentPicker.getDocumentAsync({
       type: ['application/pdf','image/jpeg','image/png','image/webp','text/plain'],
@@ -182,11 +199,7 @@ export default function TurnListImportScreen() {
   };
 
   const chooseSource = () => {
-    Alert.alert('Turn List Import', 'Choose the source document.', [
-      { text: 'Take Picture', onPress: () => { void takePhoto(); } },
-      { text: 'Choose File', onPress: () => { void chooseFile(); } },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setSourcePickerOpen(true);
   };
 
   const openEdit = (item: ItemRow) => {
@@ -244,7 +257,7 @@ export default function TurnListImportScreen() {
         <Card style={styles.hero}>
           <Text style={styles.heroTitle}>{clientName}</Text>
           <Text style={styles.heroProperty}>{propertyName}</Text>
-          <Text style={styles.heroText}>Upload the client’s turn list. The AI extracts only building and apartment numbers. The walkthrough determines what work the apartment actually needs.</Text>
+          <Text style={styles.heroText}>Upload a photo, PDF, or text turn list. The AI extracts building and apartment numbers. After you review and approve the scan, any missing buildings and units are created and added to the turnover / AI walkthrough queue.</Text>
         </Card>
 
         <Pressable disabled={Boolean(busy) || !propertyActive} onPress={chooseSource} style={[styles.uploadButton, (Boolean(busy) || !propertyActive) && styles.disabled]}>
@@ -294,7 +307,7 @@ export default function TurnListImportScreen() {
         {propertyActive && turnImport && !committed && items.length ? (
           <Pressable disabled={Boolean(busy)} onPress={() => void approve()} style={[styles.approveButton, (Boolean(busy) || reviewCount > 0) && styles.disabled]}>
             <Icon name="checkmark-done-outline" color={colors.background} size={21}/>
-            <Text style={styles.approveText}>{busy === 'commit' ? 'Building queue…' : reviewCount ? `Review ${reviewCount} item${reviewCount === 1 ? '' : 's'} first` : 'Approve & Add to Walkthrough Queue'}</Text>
+            <Text style={styles.approveText}>{busy === 'commit' ? 'Creating units & queue…' : reviewCount ? `Review ${reviewCount} item${reviewCount === 1 ? '' : 's'} first` : 'Approve & Create Units / Queue'}</Text>
           </Pressable>
         ) : null}
 
@@ -304,6 +317,30 @@ export default function TurnListImportScreen() {
           </Pressable>
         ) : null}
       </ScrollView>
+
+      <Modal visible={sourcePickerOpen} transparent animationType="fade" onRequestClose={() => setSourcePickerOpen(false)}>
+        <View style={styles.modalShade}>
+          <View style={styles.modal}>
+            <View style={styles.modalTop}>
+              <Text style={styles.modalTitle}>Add turnover unit list</Text>
+              <Pressable onPress={() => setSourcePickerOpen(false)}><Icon name="close" color={colors.text} size={22}/></Pressable>
+            </View>
+            <Text style={styles.sourcePickerText}>Use a new photo, choose an existing photo, or select a PDF/text file. The app will scan the building and unit numbers.</Text>
+            <Pressable onPress={() => { setSourcePickerOpen(false); void takePhoto(); }} style={styles.sourceOption}>
+              <Icon name="camera-outline" color={colors.teal} size={22}/>
+              <View style={styles.sourceOptionCopy}><Text style={styles.sourceOptionTitle}>Take Picture</Text><Text style={styles.sourceOptionText}>Photograph the turnover list now.</Text></View>
+            </Pressable>
+            <Pressable onPress={() => { setSourcePickerOpen(false); void choosePhoto(); }} style={styles.sourceOption}>
+              <Icon name="images-outline" color={colors.teal} size={22}/>
+              <View style={styles.sourceOptionCopy}><Text style={styles.sourceOptionTitle}>Choose Photo</Text><Text style={styles.sourceOptionText}>Pick a saved image or screenshot.</Text></View>
+            </Pressable>
+            <Pressable onPress={() => { setSourcePickerOpen(false); void chooseFile(); }} style={styles.sourceOption}>
+              <Icon name="document-attach-outline" color={colors.teal} size={22}/>
+              <View style={styles.sourceOptionCopy}><Text style={styles.sourceOptionTitle}>Choose File</Text><Text style={styles.sourceOptionText}>Select PDF, image, WebP, or text.</Text></View>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={Boolean(editItem)} transparent animationType="fade" onRequestClose={() => setEditItem(null)}>
         <View style={styles.modalShade}>
@@ -365,6 +402,11 @@ const styles = StyleSheet.create({
   modal: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 20, borderWidth: 1, padding: spacing.lg, width: '100%' },
   modalTop: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   modalTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  sourcePickerText: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: spacing.sm, marginBottom: spacing.sm },
+  sourceOption: { alignItems: 'center', backgroundColor: colors.background, borderColor: colors.border, borderRadius: 14, borderWidth: 1, flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm, minHeight: 66, paddingHorizontal: spacing.md },
+  sourceOptionCopy: { flex: 1 },
+  sourceOptionTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  sourceOptionText: { color: colors.muted, fontSize: 11, marginTop: 3 },
   fieldLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', letterSpacing: 0.8, marginTop: spacing.lg, textTransform: 'uppercase' },
   input: { backgroundColor: colors.background, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, marginBottom: spacing.sm, marginTop: 6, minHeight: 50, paddingHorizontal: spacing.md },
 });
