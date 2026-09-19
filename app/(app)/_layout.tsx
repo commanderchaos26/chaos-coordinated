@@ -1,17 +1,54 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, Tabs } from 'expo-router';
+import type { ComponentProps } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useAuth } from '../../src/context/AuthProvider';
-import { colors } from '../../src/theme';
+import { colors, radius } from '../../src/theme';
+
+type IconName = ComponentProps<typeof Ionicons>['name'];
+
+function TabIcon({ name, activeName, focused, color, size }: {
+  name: IconName;
+  activeName: IconName;
+  focused: boolean;
+  color: string;
+  size: number;
+}) {
+  return (
+    <View style={[styles.iconShell, focused && styles.iconShellActive]}>
+      <Ionicons name={focused ? activeName : name} color={color} size={Math.min(size, 22)} />
+    </View>
+  );
+}
 
 export default function AppLayout() {
   const { session, loading } = useAuth();
   if (!loading && !session) return <Redirect href="/sign-in" />;
+
   return (
-    <Tabs screenOptions={{ headerShown: false, tabBarActiveTintColor: colors.teal, tabBarInactiveTintColor: colors.subtle, tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: 76, paddingBottom: 12, paddingTop: 8 }, tabBarLabelStyle: { fontSize: 11, fontWeight: '700' }, sceneStyle: { backgroundColor: colors.background } }}>
-      <Tabs.Screen name="home" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Ionicons name="grid-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="work-orders" options={{ title: 'Work Orders', tabBarIcon: ({ color, size }) => <Ionicons name="construct-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="turnovers" options={{ title: 'Turnovers', tabBarIcon: ({ color, size }) => <Ionicons name="sync-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="management" options={{ title: 'Management', tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" color={color} size={size} /> }} />
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: colors.tealBright,
+        tabBarInactiveTintColor: colors.subtle,
+        tabBarHideOnKeyboard: true,
+        tabBarStyle: {
+          backgroundColor: colors.nav,
+          borderTopColor: colors.border,
+          borderTopWidth: 1,
+          height: 78,
+          paddingBottom: 11,
+          paddingTop: 7,
+        },
+        tabBarItemStyle: { paddingVertical: 1 },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '800', letterSpacing: 0.1 },
+        sceneStyle: { backgroundColor: colors.background },
+      }}
+    >
+      <Tabs.Screen name="home" options={{ title: 'Home', tabBarIcon: ({ color, size, focused }) => <TabIcon name="home-outline" activeName="home" focused={focused} color={color} size={size} /> }} />
+      <Tabs.Screen name="work-orders" options={{ title: 'Work Orders', tabBarIcon: ({ color, size, focused }) => <TabIcon name="construct-outline" activeName="construct" focused={focused} color={color} size={size} /> }} />
+      <Tabs.Screen name="turnovers" options={{ title: 'Turnovers', tabBarIcon: ({ color, size, focused }) => <TabIcon name="sync-outline" activeName="sync" focused={focused} color={color} size={size} /> }} />
+      <Tabs.Screen name="management" options={{ title: 'Management', tabBarIcon: ({ color, size, focused }) => <TabIcon name="people-outline" activeName="people" focused={focused} color={color} size={size} /> }} />
       <Tabs.Screen name="invite-employee" options={{ href: null, title: 'Invite Employee' }} />
       <Tabs.Screen name="employees" options={{ href: null, title: 'Employees' }} />
       <Tabs.Screen name="employee-detail" options={{ href: null, title: 'Employee Detail' }} />
@@ -35,3 +72,8 @@ export default function AppLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  iconShell: { alignItems: 'center', borderRadius: radius.pill, height: 30, justifyContent: 'center', width: 42 },
+  iconShellActive: { backgroundColor: colors.tealDeep, borderColor: '#1D6B60', borderWidth: 1 },
+});

@@ -1,0 +1,57 @@
+name: Android Preview Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'app.json'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Detect Expo token
+        id: expo
+        shell: bash
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "EXPO_TOKEN is not configured; skipping cloud APK build."
+          fi
+
+      - name: Setup Expo and EAS
+        if: steps.expo.outputs.available == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android preview APK
+        if: steps.expo.outputs.available == 'true'
+        run: eas build --platform android --profile preview --non-interactive --wait
