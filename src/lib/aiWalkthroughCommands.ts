@@ -39,6 +39,9 @@ function translateKnownError(message: string) {
   if (normalized.includes('walkthrough_not_found')) return 'That walkthrough could not be found.';
   if (normalized.includes('walkthrough_not_recording')) return 'That walkthrough is no longer accepting observations.';
   if (normalized.includes('walkthrough_already_completed')) return 'That walkthrough has already created its work orders.';
+  if (normalized.includes('finalization_in_progress')) return 'This walkthrough is already being finalized. Wait a moment, then reopen or retry to load the completed results.';
+  if (normalized.includes('finalization_key_mismatch')) return 'This walkthrough already has a different finalization request in progress. Reopen it to recover the existing session.';
+  if (normalized.includes('results_read_failed')) return 'The work orders were created, but the result list could not be loaded. Reopen the walkthrough to recover the results.';
   if (normalized.includes('transcript_text_required')) return 'Say or enter an observation before saving it.';
   if (normalized.includes('no_walkthrough_observations')) return 'Add at least one observation before finishing the walkthrough.';
   if (normalized.includes('gemini_not_configured') || normalized.includes('openai_not_configured')) return 'The AI service key has not been connected to Chaos Coordinated yet.';
@@ -82,6 +85,10 @@ export type AiWalkthroughSession = {
   ai_summary: string | null;
   model_name: string | null;
   error_message: string | null;
+  finalization_key: string | null;
+  finalization_started_at?: string | null;
+  finalization_lease_until?: string | null;
+  updated_at?: string | null;
 };
 
 export type AiWalkthroughCreatedIssue = {
@@ -155,6 +162,12 @@ export async function finalizeAiWalkthrough(params: {
 }) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    await runRpc('ai_walkthrough_prepare_finalization', {
+      p_company_id: params.companyId,
+      p_session_id: params.sessionId,
+      p_finalization_key: params.finalizationKey,
+    });
+
     const response = await Promise.race([
       supabase.functions.invoke('finalize-ai-walkthrough', {
         body: {
@@ -164,7 +177,10 @@ export async function finalizeAiWalkthrough(params: {
         },
       }),
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error('AI interpretation is taking too long. Please try again.')), AI_FINALIZE_TIMEOUT_MS);
+        timeout = setTimeout(
+          () => reject(new Error('AI finalization is still running. Reopen this walkthrough or retry in a moment; the same finalization request will be recovered safely.')),
+          AI_FINALIZE_TIMEOUT_MS,
+        );
       }),
     ]);
     if (response.error) throw new Error(translateKnownError(await messageFromFunctionError(response.error)));
@@ -176,4 +192,73 @@ export async function finalizeAiWalkthrough(params: {
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+export async function loadAiWalkthroughRecovery(companyId: string, employeeId: string) {
+  const sessionSelect = 'id,company_id,property_id,building_id,unit_id,turnover_id,work_site_id,status,started_by,started_at,finalized_at,ai_summary,model_name,error_message,finalization_key,finalization_started_at,finalization_lease_until,updated_at';
+
+  let { data: session, error } = await supabase
+    .from('ai_walkthrough_sessions')
+    .select(sessionSelect)
+    .eq('company_id', companyId)
+    .eq('started_by', employeeId)
+    .in('status', ['recording', 'processing', 'failed'])
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (!session) {
+    const recentCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const recent = await supabase
+      .from('ai_walkthrough_sessions')
+      .select(sessionSelect)
+      .eq('company_id', companyId)
+      .eq('started_by', employeeId)
+      .eq('status', 'completed')
+      .not('finalization_key', 'is', null)
+      .gte('finalized_at', recentCutoff)
+      .order('finalized_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recent.error) throw recent.error;
+    session = recent.data;
+  }
+
+  if (!session) return null;
+
+  const chunksResult = await supabase
+    .from('ai_walkthrough_transcript_chunks')
+    .select('id,sequence_no,transcript_text,source,captured_at')
+    .eq('company_id', companyId)
+    .eq('session_id', session.id)
+    .order('sequence_no');
+
+  if (chunksResult.error) throw chunksResult.error;
+
+  let result: AiWalkthroughFinalizeResult | null = null;
+  if (session.status === 'completed') {
+    const issuesResult = await supabase
+      .from('ai_walkthrough_issues')
+      .select('id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys')
+      .eq('company_id', companyId)
+      .eq('session_id', session.id)
+      .order('created_at');
+    if (issuesResult.error) throw issuesResult.error;
+
+    result = {
+      ok: true,
+      idempotent: true,
+      session_id: session.id,
+      summary: session.ai_summary ?? null,
+      issues: (issuesResult.data ?? []) as AiWalkthroughCreatedIssue[],
+    };
+  }
+
+  return {
+    session: session as AiWalkthroughSession,
+    chunks: (chunksResult.data ?? []) as Array<{ id: string; sequence_no: number; transcript_text: string; source: string; captured_at: string }>,
+    result,
+  };
 }
