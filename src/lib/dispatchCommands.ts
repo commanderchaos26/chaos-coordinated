@@ -20,7 +20,7 @@ function translateKnownError(message: string): string {
   if (normalized.includes('override_reason_required')) return 'An override reason is required when assigning during an availability conflict.';
   if (normalized.includes('invalid_assignment_transition')) return 'That assignment update is not valid for the current status.';
   if (normalized.includes('decline_reason_required')) return 'A reason is required when declining an assignment.';
-  if (normalized.includes('work_order_needs_review')) return 'This AI-created work order must be reviewed and assigned to a department before it can be dispatched.';
+  if (normalized.includes('work_order_needs_review')) return 'This AI-created work order still needs management review and a responsible department before it can continue or be completed.';
   if (normalized.includes('work_order_dependency_incomplete')) return 'This task cannot start until its prerequisite work order is completed.';
   if (normalized.includes('insufficient_permission')) return 'You do not have permission to perform that operation.';
   return message;
