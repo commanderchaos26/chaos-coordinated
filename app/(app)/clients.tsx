@@ -37,6 +37,7 @@ export default function ClientsScreen() {
         .from('clients')
         .select('id,name,phone,email,active')
         .eq('company_id', current.companyId)
+        .eq('active', true)
         .order('name');
       if (clientError) throw clientError;
 
@@ -57,12 +58,16 @@ export default function ClientsScreen() {
             .from('properties')
             .select('id,name,address_line1,city,region,postal_code')
             .in('id', propertyIds)
+            .eq('active', true)
         : { data: [], error: null };
       if (propertyError) throw propertyError;
 
       const propertyMap = new Map((properties ?? []).map((item) => [item.id, item]));
       const firstProperty = new Map<string, any>();
-      for (const link of links ?? []) if (!firstProperty.has(link.client_id)) firstProperty.set(link.client_id, link);
+      for (const link of links ?? []) {
+        if (!propertyMap.has(link.property_id)) continue;
+        if (!firstProperty.has(link.client_id)) firstProperty.set(link.client_id, link);
+      }
 
       setRows((clients ?? []).map((client) => {
         const link = firstProperty.get(client.id);
@@ -116,7 +121,7 @@ export default function ClientsScreen() {
               <View style={styles.clientIcon}><Icon name="briefcase-outline" color={colors.teal} size={21}/></View>
               <View style={styles.cardCopy}>
                 <Text style={styles.clientName}>{item.name}</Text>
-                <Text style={styles.propertyName}>{item.property_name || 'No property linked'}</Text>
+                <Text style={styles.propertyName}>{item.property_name || 'No active property linked'}</Text>
               </View>
               <Icon name="chevron-forward" color={colors.subtle} size={20}/>
             </View>

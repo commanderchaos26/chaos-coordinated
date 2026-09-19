@@ -105,6 +105,21 @@ Deno.serve(async (req: Request) => {
     if (!turnImport) return json({ error: "turn_list_import_not_found" }, 404);
     if (turnImport.status === "committed") return json({ error: "turn_list_already_committed" }, 409);
 
+    const { data: activeProperty, error: propertyError } = await adminClient
+      .from("properties")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("id", turnImport.property_id)
+      .eq("active", true)
+      .maybeSingle();
+    if (propertyError) throw propertyError;
+    if (!activeProperty) {
+      return json({
+        error: "property_archived",
+        message: "This property is archived. Turn-list scanning is disabled for archived properties.",
+      }, 409);
+    }
+
     const { data: document, error: documentError } = await adminClient
       .from("client_documents")
       .select("id,storage_bucket,storage_path,mime_type,byte_size,original_file_name")

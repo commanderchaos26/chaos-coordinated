@@ -86,11 +86,25 @@ Deno.serve(async (req: Request) => {
       if (!allowedMime.has(mimeType)) return json({ error: "unsupported_media_type" }, 400);
       if (byteSize > 50 * 1024 * 1024) return json({ error: "file_too_large" }, 400);
 
-      const [{ data: client }, { data: clientProperty }] = await Promise.all([
-        adminClient.from("clients").select("id").eq("company_id", companyId).eq("id", clientId).maybeSingle(),
+      const [
+        { data: client, error: clientError },
+        { data: clientProperty, error: clientPropertyError },
+        { data: property, error: propertyError },
+      ] = await Promise.all([
+        adminClient.from("clients").select("id").eq("company_id", companyId).eq("id", clientId).eq("active", true).maybeSingle(),
         adminClient.from("client_properties").select("id").eq("company_id", companyId).eq("client_id", clientId).eq("property_id", propertyId).maybeSingle(),
+        adminClient.from("properties").select("id").eq("company_id", companyId).eq("id", propertyId).eq("active", true).maybeSingle(),
       ]);
+      if (clientError) throw clientError;
+      if (clientPropertyError) throw clientPropertyError;
+      if (propertyError) throw propertyError;
       if (!client || !clientProperty) return json({ error: "client_property_not_found" }, 404);
+      if (!property) {
+        return json({
+          error: "property_archived",
+          message: "This property is archived. Restore or create an active property before uploading new client documents.",
+        }, 409);
+      }
 
       const { data: versionRows } = await adminClient
         .from("client_documents")
@@ -171,6 +185,28 @@ Deno.serve(async (req: Request) => {
 
       let importId: string | null = null;
       if (document.document_type === "turn_list") {
+        const { data: activeProperty, error: activePropertyError } = await adminClient
+          .from("properties")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("id", document.property_id)
+          .eq("active", true)
+          .maybeSingle();
+        if (activePropertyError) throw activePropertyError;
+        if (!activeProperty) {
+          await adminClient
+            .from("client_documents")
+            .update({
+              status: "failed",
+              ai_summary: "Property was archived before this turn list could be registered.",
+            })
+            .eq("id", documentId);
+          return json({
+            error: "property_archived",
+            message: "The file was preserved, but this property is archived so no new turn-list workflow was created.",
+          }, 409);
+        }
+
         const { data: existingImport } = await adminClient
           .from("turn_list_imports")
           .select("id")
