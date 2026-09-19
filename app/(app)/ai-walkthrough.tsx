@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -18,6 +18,8 @@ type WorkSite = { id: string; property_id: string; name: string };
 type Chunk = { id: string; sequence_no: number; transcript_text: string; source: string; captured_at: string };
 
 export default function AiWalkthroughScreen() {
+  const { turnoverId } = useLocalSearchParams<{ turnoverId?: string }>();
+  const linkedTurnoverId = typeof turnoverId === 'string' ? turnoverId : '';
   const [membership, setMembership] = useState<Membership | null>(null);
   const [authorized, setAuthorized] = useState(false);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -55,10 +57,28 @@ export default function AiWalkthroughScreen() {
         ]);
         const failure = [p,b,u,w].find((item) => item.error);
         if (failure?.error) throw failure.error;
-        setProperties((p.data ?? []) as Property[]);
-        setBuildings((b.data ?? []) as Building[]);
-        setUnits((u.data ?? []) as Unit[]);
+        const loadedProperties = (p.data ?? []) as Property[];
+        const loadedBuildings = (b.data ?? []) as Building[];
+        const loadedUnits = (u.data ?? []) as Unit[];
+        setProperties(loadedProperties);
+        setBuildings(loadedBuildings);
+        setUnits(loadedUnits);
         setWorkSites((w.data ?? []) as WorkSite[]);
+
+        if (linkedTurnoverId) {
+          const { data: linked, error: linkedError } = await supabase
+            .from('turnovers')
+            .select('property_id,building_id,unit_id')
+            .eq('company_id', current.companyId)
+            .eq('id', linkedTurnoverId)
+            .maybeSingle();
+          if (linkedError) throw linkedError;
+          if (linked) {
+            setPropertyId(linked.property_id ?? '');
+            setBuildingId(linked.building_id ?? '');
+            setUnitId(linked.unit_id ?? '');
+          }
+        }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Could not prepare AI walkthrough.');
       } finally {
@@ -66,7 +86,7 @@ export default function AiWalkthroughScreen() {
       }
     };
     void load();
-  }, []);
+  }, [linkedTurnoverId]);
 
   const visibleBuildings = useMemo(() => buildings.filter((item) => item.property_id === propertyId), [buildings, propertyId]);
   const visibleUnits = useMemo(() => units.filter((item) => item.building_id === buildingId), [units, buildingId]);
@@ -96,7 +116,7 @@ export default function AiWalkthroughScreen() {
         p_property_id: propertyId,
         p_building_id: buildingId || null,
         p_unit_id: unitId || null,
-        p_turnover_id: null,
+        p_turnover_id: linkedTurnoverId || null,
         p_work_site_id: site?.id ?? null,
       });
       setSession(started.session);
@@ -168,6 +188,7 @@ export default function AiWalkthroughScreen() {
     {!session ? <>
       <Card style={styles.hero}>
         <Text style={styles.heroTitle}>Walk it. Say it. Work orders come out the other side.</Text>
+        {linkedTurnoverId ? <Text style={styles.linkedText}>Linked to this unit turnover. Any work orders created here will stay attached to the turnover.</Text> : null}
         <Text style={styles.heroText}>Choose the location first. The walkthrough keeps the property, building, unit, transcript, and later photos tied together so the AI can create the correct departmental jobs.</Text>
       </Card>
       {properties.length ? <>
@@ -247,6 +268,7 @@ const styles = StyleSheet.create({
   hero: { padding: spacing.lg },
   heroTitle: { color: colors.text, fontSize: 19, fontWeight: '900', lineHeight: 26 },
   heroText: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: spacing.sm },
+  linkedText: { color: colors.teal, fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: spacing.sm },
   selectorBlock: { gap: spacing.sm },
   selectorTitle: { color: colors.muted, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
