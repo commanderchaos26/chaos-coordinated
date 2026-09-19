@@ -20,6 +20,7 @@ function translateKnownError(message: string): string {
   if (normalized.includes('override_reason_required')) return 'An override reason is required when assigning during an availability conflict.';
   if (normalized.includes('invalid_assignment_transition')) return 'That assignment update is not valid for the current status.';
   if (normalized.includes('decline_reason_required')) return 'A reason is required when declining an assignment.';
+  if (normalized.includes('return_reason_required')) return 'Enter what needs to be corrected before returning this work to the technician.';
   if (normalized.includes('work_order_needs_review')) return 'This AI-created work order must be reviewed and assigned to a department before it can be dispatched.';
   if (normalized.includes('work_order_dependency_incomplete')) return 'This task cannot start until its prerequisite work order is completed.';
   if (normalized.includes('insufficient_permission')) return 'You do not have permission to perform that operation.';
@@ -131,7 +132,7 @@ export function respondToAssignment(params: {
 export function transitionAssignment(params: {
   p_company_id: string;
   p_assignment_id: string;
-  p_action: 'start' | 'pause' | 'submit' | 'complete' | 'cancel';
+  p_action: 'start' | 'pause' | 'submit' | 'complete' | 'return' | 'cancel';
   p_reason?: string | null;
 }) {
   return runDispatchRpc('dispatch_transition_assignment', params);
