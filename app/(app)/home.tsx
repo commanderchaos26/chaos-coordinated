@@ -93,6 +93,33 @@ export default function HomeScreen() {
     };
   }, [load]);
 
+  useEffect(() => {
+    if (!membership) return;
+
+    const channel = supabase
+      .channel(`home-live-${membership.employeeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'assignments', filter: `employee_id=eq.${membership.employeeId}` },
+        () => { void load(); },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'employee_notifications', filter: `employee_id=eq.${membership.employeeId}` },
+        () => { void load(); },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'work_orders', filter: `company_id=eq.${membership.companyId}` },
+        () => { void load(); },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [membership?.companyId, membership?.employeeId, load]);
+
   const metrics = useMemo(() => {
     const openCount = workOrders.filter((item) => !['completed', 'cancelled', 'closed'].includes((item.status ?? '').toLowerCase())).length;
     const inProgressCount = assignments.filter((item) => ['accepted', 'active', 'paused', 'submitted'].includes((item.status ?? '').toLowerCase())).length;
