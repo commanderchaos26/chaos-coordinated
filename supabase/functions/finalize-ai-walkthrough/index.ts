@@ -32,6 +32,38 @@ function appendReviewReason(existing: unknown, extra: string) {
   return base ? `${base}; ${extra}` : extra;
 }
 
+function requireString(value: unknown, field: string, maxLength: number, allowEmpty = false) {
+  if (typeof value !== "string") throw new Error(`AI field "${field}" must be text.`);
+  const trimmed = value.trim();
+  if (!allowEmpty && !trimmed) throw new Error(`AI field "${field}" cannot be empty.`);
+  if (trimmed.length > maxLength) throw new Error(`AI field "${field}" is too long.`);
+  return trimmed;
+}
+
+function nullableString(value: unknown, field: string, maxLength: number) {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new Error(`AI field "${field}" must be text or null.`);
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+function assertNoDependencyCycles(issues: Array<{ issue_key: string; depends_on_issue_keys: string[] }>) {
+  const graph = new Map(issues.map((issue) => [issue.issue_key, issue.depends_on_issue_keys]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (key: string) => {
+    if (visiting.has(key)) throw new Error("AI produced a circular work-order dependency.");
+    if (visited.has(key)) return;
+    visiting.add(key);
+    for (const dependency of graph.get(key) ?? []) visit(dependency);
+    visiting.delete(key);
+    visited.add(key);
+  };
+
+  for (const issue of issues) visit(issue.issue_key);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -77,13 +109,23 @@ Deno.serve(async (req: Request) => {
     if (sessionError || !session) return json({ error: "walkthrough_not_found" }, 404);
 
     if (session.status === "completed") {
-      const { data: existing } = await userClient
+      const { data: existing, error: existingError } = await adminClient
         .from("ai_walkthrough_issues")
-        .select("id,issue_key,title,work_order_id,status,needs_review,review_reason")
+        .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
         .eq("company_id", companyId)
         .eq("session_id", sessionId)
         .order("created_at");
-      return json({ ok: true, idempotent: true, session_id: sessionId, issues: existing ?? [], summary: session.ai_summary ?? null });
+      if (existingError) {
+        return json({ ok: false, error: "results_read_failed", message: "The walkthrough completed, but its result list could not be loaded. Reopen the walkthrough to retry the results read." }, 200);
+      }
+      return json({
+        ok: true,
+        idempotent: true,
+        session_id: sessionId,
+        issues: existing ?? [],
+        created_count: existing?.length ?? 0,
+        summary: session.ai_summary ?? null,
+      });
     }
 
     const [{ data: chunks, error: chunksError }, { data: departments, error: departmentsError }, { data: skills, error: skillsError }] = await Promise.all([
@@ -109,11 +151,42 @@ Deno.serve(async (req: Request) => {
     const building = locationQueries[1].data;
     const unit = locationQueries[2].data;
 
-    const { error: processingError } = await userClient.rpc("ai_walkthrough_mark_processing", {
+    const { data: claimResult, error: claimError } = await userClient.rpc("ai_walkthrough_claim_finalization", {
       p_company_id: companyId,
       p_session_id: sessionId,
+      p_finalization_key: finalizationKey,
+      p_lease_seconds: 180,
     });
-    if (processingError && !String(processingError.message ?? processingError).toLowerCase().includes("walkthrough_not_ready")) throw processingError;
+    if (claimError) throw claimError;
+
+    if (claimResult?.completed) {
+      const { data: completedIssues, error: completedIssuesError } = await adminClient
+        .from("ai_walkthrough_issues")
+        .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
+        .eq("company_id", companyId)
+        .eq("session_id", sessionId)
+        .order("created_at");
+      if (completedIssuesError) {
+        return json({ ok: false, error: "results_read_failed", message: "The walkthrough completed, but its result list could not be loaded. Reopen the walkthrough to retry the results read." }, 200);
+      }
+      return json({
+        ok: true,
+        idempotent: true,
+        session_id: sessionId,
+        issues: completedIssues ?? [],
+        created_count: completedIssues?.length ?? 0,
+        summary: session.ai_summary ?? null,
+      });
+    }
+
+    if (!claimResult?.claim_granted) {
+      return json({
+        ok: false,
+        error: "finalization_in_progress",
+        message: "This walkthrough is already being finalized. Wait a moment, then reopen or retry to load the completed results.",
+        lease_until: claimResult?.lease_until ?? null,
+      }, 200);
+    }
 
     const departmentList = departments ?? [];
     const skillList = skills ?? [];
@@ -275,7 +348,15 @@ Use JSON null for unknown nullable values. Do not use markdown fences, comments,
         throw new Error("Gemini returned text that was not valid JSON.");
       }
     }
-    if (!Array.isArray(interpretation?.issues)) throw new Error("The AI result did not contain an issues array.");
+    if (!interpretation || typeof interpretation !== "object" || Array.isArray(interpretation)) {
+      throw new Error("The AI result must be a JSON object.");
+    }
+    if (!Array.isArray(interpretation.issues)) throw new Error("The AI result did not contain an issues array.");
+    if (interpretation.issues.length > 50) throw new Error("The AI returned more than the maximum 50 work items.");
+
+    const summary = interpretation.summary == null
+      ? ""
+      : requireString(interpretation.summary, "summary", 1200, true);
 
     const departmentIds = new Set(departmentList.map((d: any) => d.id));
     const skillById = new Map(skillList.map((s: any) => [s.id, s]));
@@ -283,24 +364,50 @@ Use JSON null for unknown nullable values. Do not use markdown fences, comments,
     const issueKeys = new Set<string>();
 
     const cleanedIssues = interpretation.issues.map((raw: any, index: number) => {
-      const issue: any = { ...raw };
-      issue.issue_key = String(issue.issue_key || `issue_${index + 1}`).trim();
-      if (!issue.issue_key || issueKeys.has(issue.issue_key)) throw new Error("AI produced duplicate or empty issue keys.");
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error(`AI issue #${index + 1} must be an object.`);
+      }
+
+      const issue: any = {};
+      issue.issue_key = requireString(raw.issue_key ?? `issue_${index + 1}`, "issue_key", 80);
+      if (issueKeys.has(issue.issue_key)) throw new Error("AI produced duplicate issue keys.");
       issueKeys.add(issue.issue_key);
 
-      issue.title = String(issue.title ?? "").trim().slice(0, 180);
-      if (!issue.title) throw new Error("AI produced an issue without a usable title.");
-      issue.description = String(issue.description ?? "").trim().slice(0, 1200);
-      issue.room_area = typeof issue.room_area === "string" && issue.room_area.trim() ? issue.room_area.trim().slice(0, 120) : null;
-      issue.issue_category = typeof issue.issue_category === "string" && issue.issue_category.trim() ? issue.issue_category.trim().slice(0, 120) : null;
-      issue.priority = ["low", "normal", "high", "emergency"].includes(String(issue.priority)) ? String(issue.priority) : "normal";
-      issue.occupancy_blocking = issue.occupancy_blocking === true;
-      const estimatedMinutes = Number(issue.estimated_minutes);
-      issue.estimated_minutes = Number.isInteger(estimatedMinutes) && estimatedMinutes >= 1 && estimatedMinutes <= 1440 ? estimatedMinutes : null;
-      const confidence = Number(issue.confidence);
-      issue.confidence = Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0;
-      issue.needs_review = issue.needs_review === true;
-      issue.review_reason = typeof issue.review_reason === "string" && issue.review_reason.trim() ? issue.review_reason.trim().slice(0, 500) : null;
+      issue.title = requireString(raw.title, "title", 180);
+      issue.description = requireString(raw.description ?? "", "description", 1200, true);
+      issue.room_area = nullableString(raw.room_area, "room_area", 120);
+      issue.issue_category = nullableString(raw.issue_category, "issue_category", 120);
+
+      if (raw.department_id != null && typeof raw.department_id !== "string") {
+        throw new Error("AI field \"department_id\" must be a department ID or null.");
+      }
+      issue.department_id = typeof raw.department_id === "string" && raw.department_id.trim() ? raw.department_id.trim() : null;
+
+      if (typeof raw.priority !== "string" || !["low", "normal", "high", "emergency"].includes(raw.priority)) {
+        throw new Error("AI produced an invalid priority.");
+      }
+      issue.priority = raw.priority;
+
+      if (typeof raw.occupancy_blocking !== "boolean") throw new Error("AI field \"occupancy_blocking\" must be true or false.");
+      issue.occupancy_blocking = raw.occupancy_blocking;
+
+      if (raw.estimated_minutes == null) {
+        issue.estimated_minutes = null;
+      } else if (Number.isInteger(raw.estimated_minutes) && raw.estimated_minutes >= 1 && raw.estimated_minutes <= 1440) {
+        issue.estimated_minutes = raw.estimated_minutes;
+      } else {
+        throw new Error("AI produced an invalid estimated_minutes value.");
+      }
+
+      if (typeof raw.confidence !== "number" || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1) {
+        throw new Error("AI produced an invalid confidence value.");
+      }
+      issue.confidence = raw.confidence;
+
+      if (typeof raw.needs_review !== "boolean") throw new Error("AI field \"needs_review\" must be true or false.");
+      issue.needs_review = raw.needs_review;
+      issue.review_reason = nullableString(raw.review_reason, "review_reason", 500);
+
       if (issue.confidence < 0.70) {
         issue.needs_review = true;
         issue.review_reason = appendReviewReason(issue.review_reason, "AI confidence is below the automatic-accept threshold");
@@ -311,35 +418,61 @@ Use JSON null for unknown nullable values. Do not use markdown fences, comments,
         issue.needs_review = true;
         issue.review_reason = appendReviewReason(issue.review_reason, "AI department mapping did not match an active company department");
       }
-
       if (!issue.department_id) {
         issue.needs_review = true;
         issue.review_reason = appendReviewReason(issue.review_reason, "No active company department could be assigned with confidence");
       }
 
-      issue.required_skills = Array.isArray(issue.required_skills)
-        ? issue.required_skills.filter((entry: any) => entry?.skill_id && skillById.has(entry.skill_id)).map((entry: any) => ({
-            skill_id: entry.skill_id,
-            name: skillById.get(entry.skill_id)?.name ?? entry.name,
-          }))
-        : [];
+      if (!Array.isArray(raw.required_skills)) throw new Error("AI field \"required_skills\" must be an array.");
+      if (raw.required_skills.length > 12) throw new Error("AI returned too many required skills for one issue.");
 
-      issue.source_chunk_sequences = Array.isArray(issue.source_chunk_sequences)
-        ? [...new Set(issue.source_chunk_sequences.map(Number).filter((value: number) => chunkSequenceSet.has(value)))]
-        : [];
+      const validSkills: Array<{ skill_id: string; name: string }> = [];
+      let unknownSkillCount = 0;
+      for (const entry of raw.required_skills) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.skill_id !== "string") {
+          unknownSkillCount += 1;
+          continue;
+        }
+        const known = skillById.get(entry.skill_id);
+        if (!known) {
+          unknownSkillCount += 1;
+          continue;
+        }
+        validSkills.push({ skill_id: entry.skill_id, name: known.name });
+      }
+      issue.required_skills = validSkills;
+      if (unknownSkillCount > 0) {
+        issue.needs_review = true;
+        issue.review_reason = appendReviewReason(issue.review_reason, `${unknownSkillCount} AI-selected skill${unknownSkillCount === 1 ? "" : "s"} did not match the active company skill catalog`);
+      }
+
+      if (!Array.isArray(raw.source_chunk_sequences)) throw new Error("AI field \"source_chunk_sequences\" must be an array.");
+      if (raw.source_chunk_sequences.length > 100) throw new Error("AI returned too many source transcript references.");
+      const validSequences = [...new Set(raw.source_chunk_sequences.filter((value: unknown) => Number.isInteger(value) && chunkSequenceSet.has(Number(value))).map(Number))];
+      issue.source_chunk_sequences = validSequences;
       if (!issue.source_chunk_sequences.length) {
         issue.source_chunk_sequences = chunks.map((c: any) => Number(c.sequence_no));
         issue.needs_review = true;
-        issue.review_reason = appendReviewReason(issue.review_reason, "AI did not identify a specific supporting transcript segment");
+        issue.review_reason = appendReviewReason(issue.review_reason, "AI did not identify a valid supporting transcript segment");
       }
+
+      if (!Array.isArray(raw.depends_on_issue_keys)) throw new Error("AI field \"depends_on_issue_keys\" must be an array.");
+      if (raw.depends_on_issue_keys.length > 20) throw new Error("AI returned too many dependencies for one issue.");
+      issue.depends_on_issue_keys = [...new Set(raw.depends_on_issue_keys.map((value: unknown) => {
+        if (typeof value !== "string" || !value.trim()) throw new Error("AI dependency keys must be non-empty text.");
+        return value.trim();
+      }))];
+
       return issue;
     });
 
     for (const issue of cleanedIssues) {
-      issue.depends_on_issue_keys = Array.isArray(issue.depends_on_issue_keys)
-        ? issue.depends_on_issue_keys.filter((key: unknown) => typeof key === "string" && issueKeys.has(key as string) && key !== issue.issue_key)
-        : [];
+      for (const dependency of issue.depends_on_issue_keys) {
+        if (dependency === issue.issue_key) throw new Error("AI produced a self-dependency.");
+        if (!issueKeys.has(dependency)) throw new Error(`AI dependency "${dependency}" does not match a generated issue.`);
+      }
     }
+    assertNoDependencyCycles(cleanedIssues);
 
     const { data: commitResult, error: commitError } = await adminClient.rpc("ai_walkthrough_commit_interpretation_service", {
       p_company_id: companyId,
@@ -347,26 +480,54 @@ Use JSON null for unknown nullable values. Do not use markdown fences, comments,
       p_finalization_key: finalizationKey,
       p_model_name: modelName,
       p_model_request_id: geminiPayload?.id ?? geminiPayload?.response_id ?? null,
-      p_summary: String(interpretation.summary ?? "").slice(0, 1200),
+      p_summary: summary,
       p_issues: cleanedIssues,
       p_actor_user_id: userData.user.id,
     });
     if (commitError) throw commitError;
 
-    const { data: createdIssues } = await userClient
+    const { data: createdIssues, error: createdIssuesError } = await adminClient
       .from("ai_walkthrough_issues")
       .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
       .eq("company_id", companyId)
       .eq("session_id", sessionId)
       .order("created_at");
 
+    const committed = Array.isArray(commitResult?.created) ? commitResult.created : [];
+    let responseIssues = createdIssues ?? [];
+    let resultsSource = "database";
+
+    if (createdIssuesError || responseIssues.length !== committed.length) {
+      const cleanedByKey = new Map(cleanedIssues.map((issue: any) => [issue.issue_key, issue]));
+      responseIssues = committed.map((created: any) => {
+        const cleaned = cleanedByKey.get(created.issue_key) ?? {};
+        return {
+          id: created.issue_id,
+          issue_key: created.issue_key,
+          title: cleaned.title ?? "Created work order",
+          room_area: cleaned.room_area ?? null,
+          priority: cleaned.priority ?? "normal",
+          department_id: cleaned.department_id ?? null,
+          confidence: cleaned.confidence ?? null,
+          needs_review: cleaned.needs_review ?? true,
+          review_reason: cleaned.review_reason ?? (createdIssuesError ? "Result details could not be re-read after commit." : null),
+          work_order_id: created.work_order_id,
+          status: cleaned.needs_review ? "review_required" : "created",
+          depends_on_issue_keys: cleaned.depends_on_issue_keys ?? [],
+        };
+      });
+      resultsSource = "commit_fallback";
+    }
+
     return json({
       ok: true,
-      summary: String(interpretation.summary ?? ""),
+      summary,
       model: modelName,
       request_id: geminiPayload?.id ?? geminiPayload?.response_id ?? null,
-      created: commitResult?.created ?? [],
-      issues: createdIssues ?? [],
+      created: committed,
+      created_count: committed.length,
+      issues: responseIssues,
+      results_source: resultsSource,
     });
   } catch (error) {
     const message = safeMessage(error);
