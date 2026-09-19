@@ -29,6 +29,13 @@ export function createBuilding(params: {
   return rpc('operations_create_building', params);
 }
 
+export function archiveProperty(params: {
+  p_company_id: string;
+  p_property_id: string;
+}) {
+  return rpc('operations_archive_property', params);
+}
+
 export function createUnit(params: {
   p_company_id: string;
   p_property_id: string;

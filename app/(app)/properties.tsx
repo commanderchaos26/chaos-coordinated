@@ -5,7 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { Badge, Card, EmptyState, Icon } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { loadMembership } from '../../src/lib/membership';
-import { createBuilding, createProperty, createUnit, setCircleGeofence } from '../../src/lib/operationsCommands';
+import { archiveProperty, createBuilding, createProperty, createUnit, setCircleGeofence } from '../../src/lib/operationsCommands';
 import { supabase } from '../../src/lib/supabase';
 import { colors, spacing, typography } from '../../src/theme';
 import type { Membership } from '../../src/types/app';
@@ -19,6 +19,13 @@ type ModalKind = 'property' | 'building' | 'unit' | 'geofence' | null;
 
 const canManage = (membership: Membership | null) => Boolean(membership?.roles.some((role) => role === 'owner' || role === 'operations_manager'));
 
+const deleteErrorMessage = (message: string) => {
+  if (message.includes('property_has_active_work')) return 'This property still has open work orders. Complete or cancel them before deleting the property.';
+  if (message.includes('property_has_active_turnovers')) return 'This property still has active turnovers. Close or cancel them before deleting the property.';
+  if (message.includes('property_not_found')) return 'This property is already deleted or is no longer available.';
+  return message || 'Could not delete property.';
+};
+
 export default function PropertiesScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
@@ -27,6 +34,7 @@ export default function PropertiesScreen() {
   const [sites, setSites] = useState<SiteRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalKind>(null);
 
@@ -127,6 +135,32 @@ export default function PropertiesScreen() {
     finally { setSaving(false); }
   };
 
+  const deleteProperty = async (property: PropertyRow) => {
+    if (!membership || deletingPropertyId) return;
+    setDeletingPropertyId(property.id);
+    try {
+      await archiveProperty({ p_company_id: membership.companyId, p_property_id: property.id });
+      await load();
+      Alert.alert('Property deleted', `${property.name} was removed from active property setup. Existing completed history was preserved.`);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not delete property.';
+      Alert.alert('Could not delete property', deleteErrorMessage(message));
+    } finally {
+      setDeletingPropertyId(null);
+    }
+  };
+
+  const confirmDeleteProperty = (property: PropertyRow) => {
+    Alert.alert(
+      'Delete property?',
+      `Delete ${property.name} from active property setup? Buildings, units, and geofences under it will also be removed from active setup. Completed history is preserved. Open work orders or active turnovers will block deletion.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete property', style: 'destructive', onPress: () => void deleteProperty(property) },
+      ],
+    );
+  };
+
   const availableBuildings = useMemo(() => buildings.filter((item) => !propertyId || item.property_id === propertyId), [buildings, propertyId]);
 
   if (loading) return <LoadingScreen label="Loading properties..." />;
@@ -146,7 +180,7 @@ export default function PropertiesScreen() {
           <View style={styles.rowBetween}><View style={styles.flex}><Text style={styles.propertyName}>{property.name}</Text><Text style={styles.address}>{[property.address_line1, property.city, property.region, property.postal_code].filter(Boolean).join(', ') || 'Address not entered'}</Text></View>{propertySites.length ? <Badge label="Geofence set" tone="teal" /> : <Badge label="No geofence" tone="amber" />}</View>
           <View style={styles.stats}><Text style={styles.stat}>{propertyBuildings.length} buildings</Text><Text style={styles.stat}>{propertyUnits.length} units</Text></View>
           {propertyBuildings.map((building) => <View key={building.id} style={styles.building}><View><Text style={styles.buildingName}>{building.name}{building.code ? ` · ${building.code}` : ''}</Text><Text style={styles.unitText}>{propertyUnits.filter((unit) => unit.building_id === building.id).map((unit) => unit.unit_number).join(', ') || 'No units yet'}</Text></View></View>)}
-          <View style={styles.actions}><Pressable onPress={() => open('building', property.id)} style={styles.secondary}><Text style={styles.secondaryText}>Add building</Text></Pressable><Pressable onPress={() => open('unit', property.id)} style={styles.secondary}><Text style={styles.secondaryText}>Add unit</Text></Pressable><Pressable onPress={() => open('geofence', property.id)} style={styles.secondary}><Text style={styles.secondaryText}>{propertySites.length ? 'Update geofence' : 'Set geofence'}</Text></Pressable></View>
+          <View style={styles.actions}><Pressable onPress={() => open('building', property.id)} style={styles.secondary}><Text style={styles.secondaryText}>Add building</Text></Pressable><Pressable onPress={() => open('unit', property.id)} style={styles.secondary}><Text style={styles.secondaryText}>Add unit</Text></Pressable><Pressable onPress={() => open('geofence', property.id)} style={styles.secondary}><Text style={styles.secondaryText}>{propertySites.length ? 'Update geofence' : 'Set geofence'}</Text></Pressable><Pressable disabled={deletingPropertyId === property.id} onPress={() => confirmDeleteProperty(property)} style={[styles.secondary, styles.danger, deletingPropertyId === property.id && styles.disabled]}><Icon name="trash-outline" color={colors.red} size={16} /><Text style={[styles.secondaryText, styles.dangerText]}>{deletingPropertyId === property.id ? 'Deleting…' : 'Delete property'}</Text></Pressable></View>
         </Card>;
       }) : <EmptyState icon="business-outline" title="No properties yet" message="Add the first property before creating unit work orders or geofences." />}
     </ScrollView>
@@ -173,5 +207,5 @@ function Field({ label, value, onChangeText, placeholder, keyboardType }: { labe
 }
 
 const styles = StyleSheet.create({
-  root: { backgroundColor: colors.background, gap: spacing.lg, padding: spacing.lg, paddingBottom: 110 }, header: { alignItems: 'center', flexDirection: 'row', gap: spacing.md, paddingTop: spacing.sm }, back: { alignItems: 'center', backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, height: 46, justifyContent: 'center', width: 46 }, headerCopy: { flex: 1 }, eyebrow: { color: colors.teal, fontSize: 11, fontWeight: '800', letterSpacing: 1.1 }, title: { color: colors.text, ...typography.title, marginTop: 3 }, intro: { color: colors.muted, fontSize: 14, lineHeight: 21 }, primary: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 14, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', minHeight: 54 }, primaryText: { color: colors.background, fontSize: 15, fontWeight: '900' }, propertyCard: { gap: spacing.md }, rowBetween: { alignItems: 'flex-start', flexDirection: 'row', gap: spacing.md, justifyContent: 'space-between' }, flex: { flex: 1 }, propertyName: { color: colors.text, fontSize: 18, fontWeight: '900' }, address: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 4 }, stats: { flexDirection: 'row', gap: spacing.lg }, stat: { color: colors.teal, fontSize: 12, fontWeight: '800' }, building: { backgroundColor: colors.surfaceSoft, borderRadius: 12, padding: spacing.md }, buildingName: { color: colors.text, fontSize: 14, fontWeight: '800' }, unitText: { color: colors.muted, fontSize: 12, marginTop: 4 }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }, secondary: { backgroundColor: colors.surfaceSoft, borderColor: colors.border, borderRadius: 11, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }, secondaryText: { color: colors.text, fontSize: 12, fontWeight: '800' }, errorCard: { backgroundColor: colors.redDeep }, errorText: { color: colors.text }, message: { alignItems: 'center', backgroundColor: colors.background, flex: 1, justifyContent: 'center', padding: spacing.xxl }, messageTitle: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: spacing.md }, messageText: { color: colors.muted, marginTop: spacing.sm, textAlign: 'center' }, backdrop: { backgroundColor: '#000000AA', flex: 1, justifyContent: 'flex-end' }, modal: { backgroundColor: colors.surface, borderColor: colors.border, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, maxHeight: '88%', padding: spacing.lg, paddingBottom: 36 }, modalHead: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.lg }, modalTitle: { color: colors.text, fontSize: 22, fontWeight: '900' }, field: { marginBottom: spacing.md }, label: { color: colors.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8, marginBottom: spacing.sm }, input: { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, fontSize: 15, minHeight: 50, paddingHorizontal: spacing.md }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg }, chip: { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderRadius: 12, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }, chipActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal }, chipText: { color: colors.muted, fontSize: 13, fontWeight: '800' }, chipTextActive: { color: colors.teal }, help: { color: colors.muted, fontSize: 13, lineHeight: 19, marginBottom: spacing.lg }, save: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 14, justifyContent: 'center', minHeight: 54, marginTop: spacing.sm }, saveText: { color: colors.background, fontSize: 15, fontWeight: '900' }, disabled: { opacity: 0.5 },
+  root: { backgroundColor: colors.background, gap: spacing.lg, padding: spacing.lg, paddingBottom: 110 }, header: { alignItems: 'center', flexDirection: 'row', gap: spacing.md, paddingTop: spacing.sm }, back: { alignItems: 'center', backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, height: 46, justifyContent: 'center', width: 46 }, headerCopy: { flex: 1 }, eyebrow: { color: colors.teal, fontSize: 11, fontWeight: '800', letterSpacing: 1.1 }, title: { color: colors.text, ...typography.title, marginTop: 3 }, intro: { color: colors.muted, fontSize: 14, lineHeight: 21 }, primary: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 14, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', minHeight: 54 }, primaryText: { color: colors.background, fontSize: 15, fontWeight: '900' }, propertyCard: { gap: spacing.md }, rowBetween: { alignItems: 'flex-start', flexDirection: 'row', gap: spacing.md, justifyContent: 'space-between' }, flex: { flex: 1 }, propertyName: { color: colors.text, fontSize: 18, fontWeight: '900' }, address: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 4 }, stats: { flexDirection: 'row', gap: spacing.lg }, stat: { color: colors.teal, fontSize: 12, fontWeight: '800' }, building: { backgroundColor: colors.surfaceSoft, borderRadius: 12, padding: spacing.md }, buildingName: { color: colors.text, fontSize: 14, fontWeight: '800' }, unitText: { color: colors.muted, fontSize: 12, marginTop: 4 }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }, secondary: { backgroundColor: colors.surfaceSoft, borderColor: colors.border, borderRadius: 11, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }, secondaryText: { color: colors.text, fontSize: 12, fontWeight: '800' }, danger: { alignItems: 'center', backgroundColor: colors.redDeep, borderColor: colors.red, flexDirection: 'row', gap: spacing.xs }, dangerText: { color: colors.red }, errorCard: { backgroundColor: colors.redDeep }, errorText: { color: colors.text }, message: { alignItems: 'center', backgroundColor: colors.background, flex: 1, justifyContent: 'center', padding: spacing.xxl }, messageTitle: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: spacing.md }, messageText: { color: colors.muted, marginTop: spacing.sm, textAlign: 'center' }, backdrop: { backgroundColor: '#000000AA', flex: 1, justifyContent: 'flex-end' }, modal: { backgroundColor: colors.surface, borderColor: colors.border, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, maxHeight: '88%', padding: spacing.lg, paddingBottom: 36 }, modalHead: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.lg }, modalTitle: { color: colors.text, fontSize: 22, fontWeight: '900' }, field: { marginBottom: spacing.md }, label: { color: colors.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8, marginBottom: spacing.sm }, input: { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, fontSize: 15, minHeight: 50, paddingHorizontal: spacing.md }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg }, chip: { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderRadius: 12, borderWidth: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }, chipActive: { backgroundColor: colors.tealDeep, borderColor: colors.teal }, chipText: { color: colors.muted, fontSize: 13, fontWeight: '800' }, chipTextActive: { color: colors.teal }, help: { color: colors.muted, fontSize: 13, lineHeight: 19, marginBottom: spacing.lg }, save: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 14, justifyContent: 'center', minHeight: 54, marginTop: spacing.sm }, saveText: { color: colors.background, fontSize: 15, fontWeight: '900' }, disabled: { opacity: 0.5 },
 });
