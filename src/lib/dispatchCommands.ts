@@ -107,6 +107,18 @@ export function assignWorkOrder(params: {
   return runDispatchRpc('dispatch_assign_work_order', params);
 }
 
+export function resolveAiWalkthroughIssue(params: {
+  p_company_id: string;
+  p_issue_id: string;
+  p_department_id: string;
+  p_review_note?: string | null;
+}) {
+  return runDispatchRpc('ai_walkthrough_resolve_issue', {
+    p_review_note: null,
+    ...params,
+  });
+}
+
 export function respondToAssignment(params: {
   p_company_id: string;
   p_assignment_id: string;
