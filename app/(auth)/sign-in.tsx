@@ -1,26 +1,41 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Icon } from '../../src/components/FieldUI';
+import { useAuth } from '../../src/context/AuthProvider';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radius, spacing } from '../../src/theme';
 
 const PASSWORD_RECOVERY_REDIRECT = 'chaoscoordinated://set-password';
 
 export default function SignInScreen() {
+  const { session } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  useEffect(() => {
+    if (session) router.replace('/home');
+  }, [session]);
+
   const signIn = async () => {
+    const workEmail = email.trim();
+    if (!workEmail || !password) {
+      return Alert.alert('Email and password required', 'Enter your work email and password.');
+    }
+
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: workEmail, password });
     setBusy(false);
+
     if (error) return Alert.alert('Sign-in failed', error.message);
-    router.replace('/home');
+    if (!data.session) return Alert.alert('Sign-in failed', 'Supabase did not return an authenticated session. Try again.');
+
+    // AuthProvider receives the SIGNED_IN event and the effect above navigates only
+    // after the shared session state is ready, avoiding a redirect race.
   };
 
   const recoverPassword = async () => {
@@ -67,6 +82,7 @@ export default function SignInScreen() {
           <Icon name="mail-outline" color={colors.subtle} size={19} />
           <TextInput
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
             placeholder="name@company.com"
             placeholderTextColor={colors.subtle}

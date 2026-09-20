@@ -54,7 +54,4 @@ jobs:
 
       - name: Build Android preview APK
         if: steps.expo.outputs.available == 'true'
-        run: eas-cli@latest 
-        
-
-
+        run: eas build --platform android --profile preview --non-interactive --wait

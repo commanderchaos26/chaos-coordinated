@@ -18,10 +18,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (error) console.warn('Could not restore auth session', error);
+        setSession(data.session);
+      })
+      .catch((error) => console.warn('Could not restore auth session', error))
+      .finally(() => setLoading(false));
 
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
@@ -29,8 +32,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleUrl = async (url: string) => {
       try {
-        const { type } = await consumeAuthDeepLink(url);
-        if (type === 'invite' || type === 'recovery') {
+        const { type, isPasswordRoute } = await consumeAuthDeepLink(url);
+        if (type === 'invite' || type === 'recovery' || isPasswordRoute) {
           router.replace('/set-password');
         }
       } catch (error) {
@@ -39,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     Linking.getInitialURL().then((url) => { if (url) void handleUrl(url); });
-    const linkSub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    const linkSub = Linking.addEventListener('url', ({ url }) => { void handleUrl(url); });
 
     return () => {
       authSub.subscription.unsubscribe();
