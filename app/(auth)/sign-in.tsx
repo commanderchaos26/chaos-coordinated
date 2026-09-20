@@ -6,10 +6,13 @@ import { Icon } from '../../src/components/FieldUI';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radius, spacing } from '../../src/theme';
 
+const PASSWORD_RECOVERY_REDIRECT = 'chaoscoordinated://set-password';
+
 export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const signIn = async () => {
@@ -18,6 +21,32 @@ export default function SignInScreen() {
     setBusy(false);
     if (error) return Alert.alert('Sign-in failed', error.message);
     router.replace('/home');
+  };
+
+  const recoverPassword = async () => {
+    const workEmail = email.trim();
+
+    if (!workEmail) {
+      return Alert.alert(
+        'Enter your work email',
+        'Enter the email address for your Chaos Coordinated account, then tap Forgot password?',
+      );
+    }
+
+    setResetBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(workEmail, {
+      redirectTo: PASSWORD_RECOVERY_REDIRECT,
+    });
+    setResetBusy(false);
+
+    if (error) {
+      return Alert.alert('Could not send reset email', error.message);
+    }
+
+    Alert.alert(
+      'Check your email',
+      'If an account exists for that email, you will receive a password reset link. Open the newest email on this device to choose a new password.',
+    );
   };
 
   return (
@@ -63,6 +92,16 @@ export default function SignInScreen() {
           </Pressable>
         </View>
 
+        <Pressable
+          accessibilityRole="button"
+          disabled={resetBusy}
+          hitSlop={8}
+          onPress={recoverPassword}
+          style={({ pressed }) => [styles.forgotPassword, pressed && styles.pressed, resetBusy && styles.disabled]}
+        >
+          <Text style={styles.forgotPasswordText}>{resetBusy ? 'Sending reset email…' : 'Forgot password?'}</Text>
+        </Pressable>
+
         <Pressable disabled={busy} onPress={signIn} style={({ pressed }) => [styles.button, pressed && styles.pressed, busy && styles.disabled]}>
           <Text style={styles.buttonText}>{busy ? 'Signing in…' : 'Sign in'}</Text>
           <Icon name="arrow-forward" color={colors.background} size={19} />
@@ -86,7 +125,9 @@ const styles = StyleSheet.create({
   label: { color: colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.4, marginTop: spacing.xs, textTransform: 'uppercase' },
   inputShell: { alignItems: 'center', backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flexDirection: 'row', minHeight: 56, paddingHorizontal: spacing.md },
   input: { color: colors.text, flex: 1, fontSize: 15, minHeight: 54, paddingHorizontal: spacing.sm },
-  button: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: radius.md, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', marginTop: spacing.md, minHeight: 56 },
+  forgotPassword: { alignSelf: 'flex-end', justifyContent: 'center', minHeight: 32, paddingHorizontal: spacing.xs },
+  forgotPasswordText: { color: colors.tealBright, fontSize: 13, fontWeight: '800' },
+  button: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: radius.md, flexDirection: 'row', gap: spacing.sm, justifyContent: 'center', marginTop: spacing.xs, minHeight: 56 },
   buttonText: { color: colors.background, fontSize: 15, fontWeight: '900' },
   note: { color: colors.subtle, fontSize: 11, lineHeight: 17, marginTop: spacing.lg, textAlign: 'center' },
   blueprint: { backgroundColor: '#17303B', height: 1, opacity: 0.5, position: 'absolute', width: '150%' },
