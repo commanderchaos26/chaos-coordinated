@@ -25,6 +25,16 @@ type PayrollExport = {
 
 const dayOrder = ['monday','tuesday','wednesday','thursday','friday'];
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  return fallback;
+}
+
+
 export default function PayrollScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
   const [rows, setRows] = useState<PayrollExport[]>([]);
@@ -83,7 +93,7 @@ export default function PayrollScreen() {
 
       setRows(visibleExports.map((item) => ({ ...item, employee_name: employeeMap.get(item.employee_id) ?? item.file_name.replace(/\.txt$/i, '') })));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not load payroll exports.');
+      setError(getErrorMessage(cause, 'Could not load payroll exports.'));
     } finally {
       setLoading(false);
     }
@@ -112,7 +122,7 @@ export default function PayrollScreen() {
       await load();
       Alert.alert('Payroll exports refreshed', 'The previous completed Monday–Friday payroll files were regenerated.');
     } catch (cause) {
-      Alert.alert('Payroll generation failed', cause instanceof Error ? cause.message : 'Could not generate payroll exports.');
+      Alert.alert('Payroll generation failed', getErrorMessage(cause, 'Could not generate payroll exports.'));
     } finally {
       setBusy(null);
     }
@@ -126,7 +136,7 @@ export default function PayrollScreen() {
       if (!supported) throw new Error('This device could not open the payroll file link.');
       await Linking.openURL(file.signed_url);
     } catch (cause) {
-      Alert.alert('Could not open payroll file', cause instanceof Error ? cause.message : 'Try again.');
+      Alert.alert('Could not open payroll file', getErrorMessage(cause, 'Try again.'));
     } finally {
       setBusy(null);
     }
