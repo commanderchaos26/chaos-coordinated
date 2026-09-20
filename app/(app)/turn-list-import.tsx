@@ -32,6 +32,16 @@ type ItemRow = {
   raw_text: string | null;
 };
 
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  return fallback;
+}
+
 export default function TurnListImportScreen() {
   const { clientId, propertyId } = useLocalSearchParams<{ clientId?: string; propertyId?: string }>();
   const [membership, setMembership] = useState<Membership | null>(null);
@@ -98,7 +108,7 @@ export default function TurnListImportScreen() {
         setError('This client or property is archived. Turn-list uploads, scans, corrections, and queue changes are disabled.');
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not load turn-list import.');
+      setError(getErrorMessage(cause, 'Could not load turn-list import.'));
     } finally {
       setLoading(false);
     }
@@ -114,7 +124,7 @@ export default function TurnListImportScreen() {
       await load();
       Alert.alert('Turn list scanned', `${result.total_items} unique apartment${result.total_items === 1 ? '' : 's'} found.${result.needs_review_count ? ` ${result.needs_review_count} need review.` : ''}`);
     } catch (cause) {
-      Alert.alert('AI scan failed', cause instanceof Error ? cause.message : 'Could not scan the turn list.');
+      Alert.alert('AI scan failed', getErrorMessage(cause, 'Could not scan the turn list.'));
       await load();
     } finally {
       setBusy(null);
@@ -143,7 +153,7 @@ export default function TurnListImportScreen() {
       await load();
       await scanUploadedImport(uploaded.import_id);
     } catch (cause) {
-      Alert.alert('Upload failed', cause instanceof Error ? cause.message : 'Could not upload turn list.');
+      Alert.alert('Upload failed', getErrorMessage(cause, 'Could not upload turn list.'));
     } finally {
       setBusy(null);
     }
@@ -216,7 +226,7 @@ export default function TurnListImportScreen() {
       setEditItem(null);
       await load();
     } catch (cause) {
-      Alert.alert('Correction failed', cause instanceof Error ? cause.message : 'Could not update this apartment.');
+      Alert.alert('Correction failed', getErrorMessage(cause, 'Could not update this apartment.'));
     } finally {
       setBusy(null);
     }
@@ -235,7 +245,7 @@ export default function TurnListImportScreen() {
       await load();
       Alert.alert('Walkthrough queue ready', `${result.pending_count} apartment${result.pending_count === 1 ? '' : 's'} added to the AI Walkthrough queue.`);
     } catch (cause) {
-      Alert.alert('Could not approve import', cause instanceof Error ? cause.message : 'Try again.');
+      Alert.alert('Could not approve import', getErrorMessage(cause, 'Try again.'));
     } finally {
       setBusy(null);
     }
