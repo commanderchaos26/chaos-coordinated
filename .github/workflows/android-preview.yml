@@ -7,16 +7,19 @@ on:
     paths:
       - 'app/**'
       - 'src/**'
+      - 'android/**'
       - 'app.json'
       - 'eas.json'
       - 'package.json'
       - 'package-lock.json'
+      - '.github/workflows/android-preview.yml'
 
 jobs:
   preview:
     runs-on: ubuntu-latest
     env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_PUBLIC_SUPABASE_URL: https://twmjnbktebpaqwlsrgiy.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_kpa03UQVJ2ZQTWlJAdafmQ_VdLKF1WR
 
     steps:
       - name: Checkout
@@ -28,30 +31,26 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Install
         run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Detect Expo token
-        id: expo
-        shell: bash
-        run: |
-          if [ -n "$EXPO_TOKEN" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "EXPO_TOKEN is not configured; skipping cloud APK build."
-          fi
+      - name: Build standalone Android preview APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Setup Expo and EAS
-        if: steps.expo.outputs.available == 'true'
-        uses: expo/expo-github-action@v8
+      - name: Upload Android preview APK
+        uses: actions/upload-artifact@v4
         with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build Android preview APK
-        if: steps.expo.outputs.available == 'true'
-        run: eas build --platform android --profile preview --non-interactive --wait
+          name: chaos-coordinated-android-preview
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
