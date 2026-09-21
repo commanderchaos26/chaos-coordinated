@@ -72,7 +72,11 @@ export default function DispatchScreen() {
       setWorkOrders(openOrders);
       setAssignments((assignmentsResult.data ?? []) as AssignmentRow[]);
       setDirectory(dirResult);
-      if (openOrders.length && !selectedOrderId) setSelectedOrderId(openOrders[0].id);
+      setSelectedOrderId((currentId) =>
+        currentId && openOrders.some((order) => order.id === currentId)
+          ? currentId
+          : openOrders[0]?.id ?? null
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load dispatch board.');
     } finally {
