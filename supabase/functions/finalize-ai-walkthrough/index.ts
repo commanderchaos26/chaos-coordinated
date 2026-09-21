@@ -27,6 +27,68 @@ function safeMessage(error: unknown): string {
   try { return JSON.stringify(error).slice(0, 900); } catch { return "AI walkthrough finalization failed."; }
 }
 
+class GeminiHttpError extends Error {
+  status: number;
+  retryable: boolean;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GeminiHttpError";
+    this.status = status;
+    this.retryable = [408, 429, 500, 502, 503, 504].includes(status);
+  }
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchGeminiJson(url: string, init: RequestInit, attempts = 2) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      const raw = await response.text();
+      let payload: any = null;
+
+      if (raw.trim()) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = null;
+        }
+      }
+
+      if (response.ok) {
+        if (!payload) {
+          throw new Error("Gemini returned a success response that was not valid JSON.");
+        }
+        return payload;
+      }
+
+      const detail = payload?.error?.message
+        ? `${payload.error.message}${payload?.error?.details ? ` | ${JSON.stringify(payload.error.details).slice(0, 1200)}` : ""}`
+        : raw.trim().slice(0, 900) || `Gemini request failed with status ${response.status}`;
+      const upstreamError = new GeminiHttpError(detail, response.status);
+      lastError = upstreamError;
+
+      if (!upstreamError.retryable || attempt === attempts - 1) {
+        throw upstreamError;
+      }
+    } catch (error) {
+      lastError = error;
+      const retryable = error instanceof GeminiHttpError
+        ? error.retryable
+        : error instanceof TypeError;
+
+      if (!retryable || attempt === attempts - 1) throw error;
+    }
+
+    await delay(800 * (2 ** attempt) + Math.floor(Math.random() * 250));
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Gemini request failed.");
+}
+
 function appendReviewReason(existing: unknown, extra: string) {
   const base = typeof existing === "string" && existing.trim() ? existing.trim() : "";
   return base ? `${base}; ${extra}` : extra;
@@ -253,7 +315,9 @@ Deno.serve(async (req: Request) => {
 
     const configuredModel = Deno.env.get("GEMINI_MODEL")?.trim();
     const supportedModels = new Set(["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]);
-    const modelName = configuredModel && supportedModels.has(configuredModel) ? configuredModel : "gemini-3.8-flash";
+    const preferredModel = configuredModel && supportedModels.has(configuredModel) ? configuredModel : "gemini-3.8-flash";
+    const modelCandidates = [...new Set([preferredModel, "gemini-3.7-flash", "gemini-3.6-flash"])];
+    let modelName = preferredModel;
     const cleanSchema = (node: any): any => {
       if (Array.isArray(node)) return node.map(cleanSchema);
       if (node && typeof node === "object") {
@@ -296,25 +360,37 @@ Use JSON null for unknown nullable values. Do not use markdown fences, comments,
 
     const fullPrompt = `${instructions}\n\n${jsonContract}\n\nWalkthrough context:\n${JSON.stringify(context)}`;
 
-    const interactionResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(geminiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: modelName,
-          store: false,
-          input: fullPrompt,
-        }),
-      },
-    );
+    let geminiPayload: any = null;
+    let lastGeminiError: unknown = null;
 
-    const geminiPayload = await interactionResponse.json();
-    if (!interactionResponse.ok) {
-      const detail = geminiPayload?.error?.message
-        ? `${geminiPayload.error.message}${geminiPayload?.error?.details ? ` | ${JSON.stringify(geminiPayload.error.details).slice(0, 1200)}` : ""}`
-        : `Gemini request failed with status ${interactionResponse.status}`;
-      throw new Error(detail);
+    for (const candidate of modelCandidates) {
+      try {
+        geminiPayload = await fetchGeminiJson(
+          `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(geminiKey)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: candidate,
+              store: false,
+              input: fullPrompt,
+            }),
+          },
+          2,
+        );
+        modelName = candidate;
+        lastGeminiError = null;
+        break;
+      } catch (error) {
+        lastGeminiError = error;
+        if (!(error instanceof GeminiHttpError) || !error.retryable) throw error;
+      }
+    }
+
+    if (!geminiPayload) {
+      throw lastGeminiError instanceof Error
+        ? lastGeminiError
+        : new Error("Gemini walkthrough interpretation failed after retries.");
     }
 
     let outputText = typeof geminiPayload?.output_text === "string" ? geminiPayload.output_text.trim() : "";
