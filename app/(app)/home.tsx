@@ -10,6 +10,7 @@ import { formatStatus } from '../../src/lib/employeeData';
 import { completeAdmission, loadMembership } from '../../src/lib/membership';
 import { registerForPushNotifications, registerNotificationTapHandler } from '../../src/lib/pushNotifications';
 import { supabase } from '../../src/lib/supabase';
+import { isTerminalAssignmentStatus, isTerminalWorkOrderStatus } from '../../src/lib/workOrderFlow';
 import { colors, spacing, typography } from '../../src/theme';
 import type { Membership } from '../../src/types/app';
 
@@ -71,8 +72,8 @@ export default function HomeScreen() {
       const activeAssignments = enriched.filter((assignment) => {
         const assignmentStatus = String(assignment.status ?? '').toLowerCase();
         const workOrderStatus = String(assignment.work_orders?.status ?? '').toLowerCase();
-        return !['completed', 'cancelled'].includes(assignmentStatus)
-          && !['completed', 'cancelled', 'closed'].includes(workOrderStatus);
+        return !isTerminalAssignmentStatus(assignmentStatus)
+          && !isTerminalWorkOrderStatus(workOrderStatus);
       });
 
       setAssignments(activeAssignments);
@@ -128,7 +129,7 @@ export default function HomeScreen() {
   }, [membership?.companyId, membership?.employeeId, load]);
 
   const metrics = useMemo(() => {
-    const openCount = workOrders.filter((item) => !['completed', 'cancelled', 'closed'].includes((item.status ?? '').toLowerCase())).length;
+    const openCount = workOrders.filter((item) => !isTerminalWorkOrderStatus(item.status)).length;
     const inProgressCount = assignments.filter((item) => ['accepted', 'active', 'paused', 'submitted'].includes((item.status ?? '').toLowerCase())).length;
     const needsAttention = assignments.filter((item) => ['offered', 'declined'].includes((item.status ?? '').toLowerCase())).length + workOrders.filter((item) => ['overdue', 'urgent'].includes((item.priority || '').toLowerCase())).length;
     return { openCount, inProgressCount, needsAttention };
