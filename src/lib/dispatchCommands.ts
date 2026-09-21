@@ -19,6 +19,9 @@ function translateKnownError(message: string): string {
   if (normalized.includes('employee_unavailable')) return 'This employee is unavailable during the chosen time window. Add an override reason to authorize the assignment.';
   if (normalized.includes('override_reason_required')) return 'An override reason is required when assigning during an availability conflict.';
   if (normalized.includes('invalid_assignment_transition')) return 'That assignment update is not valid for the current status.';
+  if (normalized.includes('invalid_assignment_response_state')) return 'This assignment has already been answered. Refresh before taking another action.';
+  if (normalized.includes('employee_account_not_active')) return 'This employee does not have an active app account and cannot receive assignments yet.';
+  if (normalized.includes('employee_not_active')) return 'This employee is not active and cannot receive assignments.';
   if (normalized.includes('decline_reason_required')) return 'A reason is required when declining an assignment.';
   if (normalized.includes('work_order_needs_review')) return 'This AI-created work order still needs management review and a responsible department before it can continue or be completed.';
   if (normalized.includes('work_order_dependency_incomplete')) return 'This task cannot start until its prerequisite work order is completed.';
