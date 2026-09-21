@@ -42,6 +42,68 @@ function parseJson(text: string) {
   }
 }
 
+class GeminiHttpError extends Error {
+  status: number;
+  retryable: boolean;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GeminiHttpError";
+    this.status = status;
+    this.retryable = [408, 429, 500, 502, 503, 504].includes(status);
+  }
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchGeminiJson(url: string, init: RequestInit, attempts = 2) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      const raw = await response.text();
+      let payload: any = null;
+
+      if (raw.trim()) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = null;
+        }
+      }
+
+      if (response.ok) {
+        if (!payload) {
+          throw new Error("Gemini returned a success response that was not valid JSON.");
+        }
+        return payload;
+      }
+
+      const detail = payload?.error?.message
+        || raw.trim().slice(0, 900)
+        || `Gemini request failed with status ${response.status}`;
+      const upstreamError = new GeminiHttpError(detail, response.status);
+      lastError = upstreamError;
+
+      if (!upstreamError.retryable || attempt === attempts - 1) {
+        throw upstreamError;
+      }
+    } catch (error) {
+      lastError = error;
+      const retryable = error instanceof GeminiHttpError
+        ? error.retryable
+        : error instanceof TypeError;
+
+      if (!retryable || attempt === attempts - 1) throw error;
+    }
+
+    await delay(800 * (2 ** attempt) + Math.floor(Math.random() * 250));
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Gemini request failed.");
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -182,26 +244,44 @@ Rules:
     }
 
     const configuredModel = Deno.env.get("GEMINI_MODEL")?.trim();
-    const modelName = configuredModel || "gemini-3.8-flash";
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(geminiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-            maxOutputTokens: 8000,
-          },
-        }),
-      },
-    );
+    const fallbackModels = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
+    const modelCandidates = [...new Set([configuredModel, ...fallbackModels].filter(Boolean))] as string[];
 
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload?.error?.message || `Gemini scan failed with status ${response.status}`);
+    let payload: any = null;
+    let modelName = modelCandidates[0] || "gemini-3.8-flash";
+    let lastGeminiError: unknown = null;
+
+    for (const candidate of modelCandidates) {
+      try {
+        payload = await fetchGeminiJson(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(candidate)}:generateContent?key=${encodeURIComponent(geminiKey)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts }],
+              generationConfig: {
+                temperature: 0.1,
+                responseMimeType: "application/json",
+                maxOutputTokens: 8000,
+              },
+            }),
+          },
+          2,
+        );
+        modelName = candidate;
+        lastGeminiError = null;
+        break;
+      } catch (error) {
+        lastGeminiError = error;
+        if (!(error instanceof GeminiHttpError) || !error.retryable) throw error;
+      }
+    }
+
+    if (!payload) {
+      throw lastGeminiError instanceof Error
+        ? lastGeminiError
+        : new Error("Gemini turn-list scan failed after retries.");
     }
 
     const outputText = extractText(payload);
