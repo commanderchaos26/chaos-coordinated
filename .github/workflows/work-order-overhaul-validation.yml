@@ -1,0 +1,48 @@
+name: Work Order Overhaul Validation
+
+on:
+  push:
+    branches:
+      - fix/work-order-flow-overhaul-20260921
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://twmjnbktebpaqwlsrgiy.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_kpa03UQVJ2ZQTWlJAdafmQ_VdLKF1WR
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Expo dependency and config doctor
+        run: npx expo-doctor
+
+      - name: Production Metro export
+        run: npx expo export --platform android --output-dir /tmp/chaos-coordinated-export
+
+      - name: Android release compile
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
