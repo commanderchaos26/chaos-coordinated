@@ -1,0 +1,37 @@
+name: Publish installable preview APK
+
+on:
+  push:
+    branches:
+      - ops/publish-preview-apk-20260921
+    paths:
+      - '.github/workflows/publish-preview-apk.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: chaos-coordinated-android-preview
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: commanderchaos26/chaos-coordinated
+          run-id: 35592078169
+
+      - name: Prepare APK
+        run: |
+          test -f dist/app-release.apk
+          mv dist/app-release.apk dist/Chaos-Coordinated-0.2.0.apk
+          sha256sum dist/Chaos-Coordinated-0.2.0.apk
+
+      - name: Create GitHub release with direct APK asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v0.2.0-preview.1"             "dist/Chaos-Coordinated-0.2.0.apk"             --repo "commanderchaos26/chaos-coordinated"             --target "797673419de87fa45604d9a4d0d05e2c117044d0"             --title "Chaos Coordinated 0.2.0 Preview"             --notes "Installable Android preview from successful Android Preview Build #18. Includes merged PR #16 startup animation restoration."
