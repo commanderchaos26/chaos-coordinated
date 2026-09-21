@@ -44,7 +44,7 @@ async function rpc<T = unknown>(name: string, params: RpcParams): Promise<T> {
         supabase.rpc(name, params),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(
-            () => reject(new Error('The request timed out. The server may still have saved it; retrying is safe.')),
+            () => reject(new Error('The request timed out. The server may still have completed it; check the result before trying again.')),
             COMMAND_TIMEOUT_MS,
           );
         }),
