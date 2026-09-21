@@ -8,6 +8,7 @@ import { assignWorkOrder, resolveAiWalkthroughIssue } from '../../src/lib/dispat
 import { formatStatus, loadEmployeeDirectory } from '../../src/lib/employeeData';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
+import { isLiveAssignmentStatus } from '../../src/lib/workOrderFlow';
 import { colors, spacing, typography } from '../../src/theme';
 import type { Membership } from '../../src/types/app';
 
@@ -18,14 +19,13 @@ type WorkOrder = {
   priority: string;
   due_at: string | null;
   department_id: string | null;
+  required_skill_snapshot: unknown;
   needs_review?: boolean;
   review_issue_id?: string | null;
   review_reason?: string | null;
 };
 
 type AssignmentRow = { id: string; employee_id: string; work_order_id: string; status: string };
-const liveAssignmentStatuses = new Set(['offered', 'accepted', 'active', 'paused', 'submitted']);
-const isLiveAssignment = (status: string | null | undefined) => liveAssignmentStatuses.has((status ?? '').toLowerCase());
 const canDispatch = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner', 'operations_manager', 'supervisor', 'dispatcher'].includes(role)));
 
 export default function DispatchScreen() {
@@ -50,7 +50,7 @@ export default function DispatchScreen() {
       setMembership(current);
       if (!current || !canDispatch(current)) return;
       const [ordersResult, assignmentsResult, reviewResult, dirResult] = await Promise.all([
-        supabase.from('work_orders').select('id,title,status,priority,due_at,department_id').eq('company_id', current.companyId).order('due_at', { ascending: true, nullsFirst: false }),
+        supabase.from('work_orders').select('id,title,status,priority,due_at,department_id,required_skill_snapshot').eq('company_id', current.companyId).order('due_at', { ascending: true, nullsFirst: false }),
         supabase.from('assignments').select('id,employee_id,work_order_id,status').eq('company_id', current.companyId),
         supabase.from('ai_walkthrough_issues').select('id,work_order_id,needs_review,review_reason').eq('company_id', current.companyId).eq('needs_review', true),
         loadEmployeeDirectory(current.companyId),
@@ -84,7 +84,7 @@ export default function DispatchScreen() {
 
   const selectedOrder = useMemo(() => workOrders.find((order) => order.id === selectedOrderId) ?? null, [selectedOrderId, workOrders]);
   const currentAssignment = useMemo(
-    () => assignments.find((row) => row.work_order_id === selectedOrderId && isLiveAssignment(row.status)) ?? null,
+    () => assignments.find((row) => row.work_order_id === selectedOrderId && isLiveAssignmentStatus(row.status)) ?? null,
     [assignments, selectedOrderId],
   );
   const currentAssigneeName = useMemo(
@@ -94,14 +94,60 @@ export default function DispatchScreen() {
 
   const candidates = useMemo(() => {
     if (!directory || !selectedOrder) return [];
-    return directory.employees.map((employee) => {
-      const department = directory.departments.find((item) => item.id === employee.primary_department_id);
-      const crewMembership = directory.crewMembers.find((row) => row.employee_id === employee.id && row.active);
-      const crew = crewMembership ? directory.crews.find((item) => item.id === crewMembership.crew_id) : null;
-      const skills = directory.employeeSkills.filter((row) => row.employee_id === employee.id).map((row) => directory.skills.find((skill) => skill.id === row.skill_id)?.name).filter(Boolean) as string[];
-      const assignmentCount = assignments.filter((row) => row.employee_id === employee.id && isLiveAssignment(row.status)).length;
-      return { employee, department, crew, skills, assignmentCount };
-    }).filter((item) => item.employee.employment_status?.toLowerCase() !== 'inactive');
+
+    const requiredSkills = (Array.isArray(selectedOrder.required_skill_snapshot) ? selectedOrder.required_skill_snapshot : [])
+      .map((value) => {
+        if (typeof value === 'string') return { id: null, name: value.trim().toLowerCase() };
+        if (!value || typeof value !== 'object') return null;
+        const record = value as { skill_id?: unknown; id?: unknown; name?: unknown };
+        const id = typeof record.skill_id === 'string' ? record.skill_id : typeof record.id === 'string' ? record.id : null;
+        const name = typeof record.name === 'string' ? record.name.trim().toLowerCase() : '';
+        return id || name ? { id, name } : null;
+      })
+      .filter(Boolean) as Array<{ id: string | null; name: string }>;
+
+    return directory.employees
+      .filter((employee) => employee.employment_status?.toLowerCase() === 'active')
+      .filter((employee) => directory.links.some((link) => link.employee_id === employee.id && link.status?.toLowerCase() === 'active'))
+      .map((employee) => {
+        const department = directory.departments.find((item) => item.id === employee.primary_department_id);
+        const employeeDepartmentIds = new Set([
+          ...(employee.primary_department_id ? [employee.primary_department_id] : []),
+          ...directory.employeeDepartments
+            .filter((row) => row.employee_id === employee.id && row.active)
+            .map((row) => row.department_id),
+        ]);
+        const departmentMatch = !selectedOrder.department_id || employeeDepartmentIds.has(selectedOrder.department_id);
+
+        const crewMembership = directory.crewMembers.find((row) => row.employee_id === employee.id && row.active);
+        const crew = crewMembership ? directory.crews.find((item) => item.id === crewMembership.crew_id) : null;
+        const employeeSkillRows = directory.employeeSkills.filter((row) => row.employee_id === employee.id);
+        const employeeSkillIds = new Set(employeeSkillRows.map((row) => row.skill_id));
+        const skills = employeeSkillRows
+          .map((row) => directory.skills.find((skill) => skill.id === row.skill_id)?.name)
+          .filter(Boolean) as string[];
+        const employeeSkillNames = new Set(skills.map((name) => name.trim().toLowerCase()));
+        const matchedSkillCount = requiredSkills.filter((required) =>
+          (required.id && employeeSkillIds.has(required.id)) || (required.name && employeeSkillNames.has(required.name))
+        ).length;
+        const assignmentCount = assignments.filter((row) => row.employee_id === employee.id && isLiveAssignmentStatus(row.status)).length;
+        return {
+          employee,
+          department,
+          crew,
+          skills,
+          assignmentCount,
+          departmentMatch,
+          matchedSkillCount,
+          requiredSkillCount: requiredSkills.length,
+        };
+      })
+      .sort((left, right) =>
+        Number(right.departmentMatch) - Number(left.departmentMatch)
+        || right.matchedSkillCount - left.matchedSkillCount
+        || left.assignmentCount - right.assignmentCount
+        || left.employee.display_name.localeCompare(right.employee.display_name)
+      );
   }, [assignments, directory, selectedOrder]);
 
   if (loading) return <LoadingScreen label="Loading dispatch board..." />;
@@ -241,9 +287,9 @@ export default function DispatchScreen() {
   }
 }
 
-function CandidateCard({ candidate, onAssign }: { candidate: { employee: any; department: any; crew: any; skills: string[]; assignmentCount: number }; onAssign: () => void }) {
-  const strong = candidate.skills.length > 0 || candidate.assignmentCount === 0;
-  return <Card style={[styles.candidateCard, strong && styles.candidateStrong]}><View style={styles.candidateHeader}><View><Text style={styles.candidateName}>{candidate.employee.display_name}</Text><Text style={styles.candidateMeta}>{candidate.department?.name ?? 'No department'} • {candidate.crew?.name ?? 'No crew'}</Text></View><Badge label={candidate.employee.floater_eligible ? 'Floater' : 'Fixed'} tone={candidate.employee.floater_eligible ? 'teal' : 'neutral'} /></View><Text style={styles.skillLine}>{candidate.skills.length ? candidate.skills.slice(0, 3).join(', ') : 'No skills assigned'}</Text><Text style={styles.metaText}>Current workload: {candidate.assignmentCount} active assignment{candidate.assignmentCount === 1 ? '' : 's'}</Text><Pressable onPress={onAssign} style={styles.assignButton}><Text style={styles.assignText}>Assign</Text></Pressable></Card>;
+function CandidateCard({ candidate, onAssign }: { candidate: { employee: any; department: any; crew: any; skills: string[]; assignmentCount: number; departmentMatch: boolean; matchedSkillCount: number; requiredSkillCount: number }; onAssign: () => void }) {
+  const strong = candidate.departmentMatch && (candidate.requiredSkillCount === 0 || candidate.matchedSkillCount === candidate.requiredSkillCount);
+  return <Card style={[styles.candidateCard, strong && styles.candidateStrong]}><View style={styles.candidateHeader}><View><Text style={styles.candidateName}>{candidate.employee.display_name}</Text><Text style={styles.candidateMeta}>{candidate.department?.name ?? 'No primary department'} • {candidate.crew?.name ?? 'No crew'}</Text></View><Badge label={candidate.departmentMatch ? 'Department match' : candidate.employee.floater_eligible ? 'Floater' : 'Cross-department'} tone={candidate.departmentMatch ? 'teal' : 'neutral'} /></View><Text style={styles.skillLine}>{candidate.skills.length ? candidate.skills.slice(0, 3).join(', ') : 'No skills assigned'}</Text>{candidate.requiredSkillCount > 0 ? <Text style={styles.metaText}>Required skills matched: {candidate.matchedSkillCount}/{candidate.requiredSkillCount}</Text> : <Text style={styles.metaText}>No specific skill requirement</Text>}<Text style={styles.metaText}>Current workload: {candidate.assignmentCount} active assignment{candidate.assignmentCount === 1 ? '' : 's'}</Text><Pressable onPress={onAssign} style={styles.assignButton}><Text style={styles.assignText}>Assign</Text></Pressable></Card>;
 }
 
 function Feedback({ tone, message }: { tone: 'success' | 'error'; message: string }) { return <View style={[styles.feedback, tone === 'success' ? styles.success : styles.failure]}><Icon name={tone === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} color={tone === 'success' ? colors.teal : colors.red} size={18} /><Text style={styles.feedbackText}>{message}</Text></View>; }
