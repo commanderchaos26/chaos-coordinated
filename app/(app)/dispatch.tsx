@@ -8,7 +8,7 @@ import { assignWorkOrder, resolveAiWalkthroughIssue } from '../../src/lib/dispat
 import { formatStatus, loadEmployeeDirectory } from '../../src/lib/employeeData';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
-import { isLiveAssignmentStatus } from '../../src/lib/workOrderFlow';
+import { isLiveAssignmentStatus, isTerminalWorkOrderStatus } from '../../src/lib/workOrderFlow';
 import { colors, spacing, typography } from '../../src/theme';
 import type { Membership } from '../../src/types/app';
 
@@ -68,7 +68,7 @@ export default function DispatchScreen() {
           review_reason: review?.review_reason ?? null,
         };
       });
-      const openOrders = orders.filter((order) => !['completed', 'cancelled', 'closed'].includes((order.status ?? '').toLowerCase()));
+      const openOrders = orders.filter((order) => !isTerminalWorkOrderStatus(order.status));
       setWorkOrders(openOrders);
       setAssignments((assignmentsResult.data ?? []) as AssignmentRow[]);
       setDirectory(dirResult);
