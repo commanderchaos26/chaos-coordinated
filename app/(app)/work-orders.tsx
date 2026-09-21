@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Badge, Card, EmptyState, Icon, SectionHeader } from '../../src/components/FieldUI';
 import { LoadingScreen } from '../../src/components/LoadingScreen';
@@ -7,6 +7,7 @@ import { formatStatus } from '../../src/lib/employeeData';
 import { loadMyFeaturePermissions } from '../../src/lib/featurePermissionCommands';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
+import { isTerminalWorkOrderStatus, selectCurrentAssignment } from '../../src/lib/workOrderFlow';
 import { colors, spacing, typography } from '../../src/theme';
 import type { Membership } from '../../src/types/app';
 
@@ -32,7 +33,6 @@ type Row = WorkOrderRow & {
 };
 
 const canCreate = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner','operations_manager','supervisor','dispatcher','crew_lead'].includes(role)));
-const ARCHIVED_STATUSES = new Set(['completed', 'cancelled', 'closed']);
 
 export default function WorkOrdersScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
@@ -70,7 +70,7 @@ export default function WorkOrdersScreen() {
       const departmentIds = [...new Set(orders.map((item) => item.department_id).filter(Boolean) as string[])];
 
       const [assignmentsResult, propertiesResult, buildingsResult, unitsResult, departmentsResult] = await Promise.all([
-        orderIds.length ? supabase.from('assignments').select('id,work_order_id,employee_id,status,created_at').in('work_order_id', orderIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
+        orderIds.length ? supabase.from('assignments').select('id,work_order_id,employee_id,status,created_at').eq('company_id', current.companyId).in('work_order_id', orderIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
         propertyIds.length ? supabase.from('properties').select('id,name').in('id', propertyIds) : Promise.resolve({ data: [], error: null }),
         buildingIds.length ? supabase.from('buildings').select('id,name').in('id', buildingIds) : Promise.resolve({ data: [], error: null }),
         unitIds.length ? supabase.from('units').select('id,unit_number').in('id', unitIds) : Promise.resolve({ data: [], error: null }),
@@ -80,8 +80,17 @@ export default function WorkOrdersScreen() {
       const failure = [assignmentsResult, propertiesResult, buildingsResult, unitsResult, departmentsResult].find((result) => result.error);
       if (failure?.error) throw failure.error;
 
+      const assignmentsByOrder = new Map<string, any[]>();
+      for (const assignment of assignmentsResult.data ?? []) {
+        const rows = assignmentsByOrder.get(assignment.work_order_id) ?? [];
+        rows.push(assignment);
+        assignmentsByOrder.set(assignment.work_order_id, rows);
+      }
       const assignmentMap = new Map<string, any>();
-      for (const assignment of assignmentsResult.data ?? []) if (!assignmentMap.has(assignment.work_order_id)) assignmentMap.set(assignment.work_order_id, assignment);
+      for (const order of orders) {
+        const currentAssignment = selectCurrentAssignment(assignmentsByOrder.get(order.id) ?? [], order.status);
+        if (currentAssignment) assignmentMap.set(order.id, currentAssignment);
+      }
       const employeeIds = [...new Set(Array.from(assignmentMap.values()).map((item) => item.employee_id).filter(Boolean))];
       const employeeMap = new Map<string, string>();
       if (employeeIds.length) {
@@ -116,8 +125,18 @@ export default function WorkOrdersScreen() {
     void load();
   }, [load]));
 
-  const activeRows = useMemo(() => rows.filter((item) => !ARCHIVED_STATUSES.has((item.status ?? '').toLowerCase())), [rows]);
-  const archivedRows = useMemo(() => rows.filter((item) => ARCHIVED_STATUSES.has((item.status ?? '').toLowerCase())), [rows]);
+  useEffect(() => {
+    if (!membership) return;
+    const channel = supabase
+      .channel(`work-orders-live-${membership.companyId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'work_orders', filter: `company_id=eq.${membership.companyId}` }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignments', filter: `company_id=eq.${membership.companyId}` }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [membership?.companyId, load]);
+
+  const activeRows = useMemo(() => rows.filter((item) => !isTerminalWorkOrderStatus(item.status)), [rows]);
+  const archivedRows = useMemo(() => rows.filter((item) => isTerminalWorkOrderStatus(item.status)), [rows]);
   const currentRows = showArchive ? archivedRows : activeRows;
   const visibleRows = useMemo(() => currentRows.filter((item) => `${item.title} ${item.status} ${item.priority} ${item.employee_name ?? ''} ${item.property_name ?? ''} ${item.unit_number ?? ''} ${item.department_name ?? ''}`.toLowerCase().includes(query.toLowerCase())), [currentRows, query]);
 

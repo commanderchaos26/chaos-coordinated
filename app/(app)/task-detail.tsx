@@ -9,8 +9,17 @@ import { respondToAssignment, transitionAssignment } from '../../src/lib/dispatc
 import { formatStatus } from '../../src/lib/employeeData';
 import { loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
+import { selectCurrentAssignment } from '../../src/lib/workOrderFlow';
 import { getCompletionEvidence, uploadCompletionPhoto, type CompletionEvidence } from '../../src/lib/workEvidence';
 import { colors, spacing } from '../../src/theme';
+
+type WorkOrderStatusEvent = {
+  id: string;
+  from_status: string | null;
+  to_status: string;
+  reason: string | null;
+  created_at: string;
+};
 
 export default function TaskDetailScreen() {
   const { id, assignmentId } = useLocalSearchParams<{ id?: string; assignmentId?: string }>();
@@ -25,6 +34,7 @@ export default function TaskDetailScreen() {
   const [completionNote, setCompletionNote] = useState('Completed from mobile');
   const [completionPhotos, setCompletionPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [storedEvidence, setStoredEvidence] = useState<CompletionEvidence[]>([]);
+  const [statusEvents, setStatusEvents] = useState<WorkOrderStatusEvent[]>([]);
 
   const refreshStoredEvidence = async (current: any, assignmentRow: any, workOrderId: string) => {
     try {
@@ -36,6 +46,21 @@ export default function TaskDetailScreen() {
       setStoredEvidence(evidence);
     } catch {
       setStoredEvidence([]);
+    }
+  };
+
+  const refreshStatusHistory = async (current: any, workOrderId: string) => {
+    try {
+      const { data, error: historyError } = await supabase
+        .from('work_order_status_events')
+        .select('id,from_status,to_status,reason,created_at')
+        .eq('company_id', current.companyId)
+        .eq('work_order_id', workOrderId)
+        .order('created_at', { ascending: false });
+      if (historyError) throw historyError;
+      setStatusEvents((data ?? []) as WorkOrderStatusEvent[]);
+    } catch {
+      setStatusEvents([]);
     }
   };
 
@@ -72,7 +97,10 @@ export default function TaskDetailScreen() {
 
         setAssignment(exactAssignment);
         setWorkOrder(workOrderResult.data);
-        await refreshStoredEvidence(current, exactAssignment, exactAssignment.work_order_id);
+        await Promise.all([
+          refreshStoredEvidence(current, exactAssignment, exactAssignment.work_order_id),
+          refreshStatusHistory(current, exactAssignment.work_order_id),
+        ]);
         return;
       }
 
@@ -80,22 +108,29 @@ export default function TaskDetailScreen() {
         setAssignment(null);
         setWorkOrder(null);
         setStoredEvidence([]);
+        setStatusEvents([]);
         return;
       }
 
       const [workOrderResult, assignmentResult] = await Promise.all([
         supabase.from('work_orders').select('*').eq('company_id', current.companyId).eq('id', id).maybeSingle(),
-        supabase.from('assignments').select('*').eq('company_id', current.companyId).eq('work_order_id', id).order('created_at', { ascending: false }).limit(1),
+        supabase.from('assignments').select('*').eq('company_id', current.companyId).eq('work_order_id', id).order('created_at', { ascending: false }),
       ]);
 
       if (workOrderResult.error) throw workOrderResult.error;
       if (assignmentResult.error) throw assignmentResult.error;
 
-      const latestAssignment = (assignmentResult.data ?? [])[0] ?? null;
+      const assignmentRows = assignmentResult.data ?? [];
+      const currentAssignment = selectCurrentAssignment(assignmentRows, workOrderResult.data?.status);
       setWorkOrder(workOrderResult.data);
-      setAssignment(latestAssignment);
-      if (latestAssignment && workOrderResult.data?.id) {
-        await refreshStoredEvidence(current, latestAssignment, workOrderResult.data.id);
+      setAssignment(currentAssignment);
+      if (workOrderResult.data?.id) {
+        await refreshStatusHistory(current, workOrderResult.data.id);
+      } else {
+        setStatusEvents([]);
+      }
+      if (currentAssignment && workOrderResult.data?.id) {
+        await refreshStoredEvidence(current, currentAssignment, workOrderResult.data.id);
       } else {
         setStoredEvidence([]);
       }
@@ -370,6 +405,21 @@ export default function TaskDetailScreen() {
         <EmptyState icon="construct-outline" title="Task not loaded" message="This task has no visible work-order details." />
       )}
 
+      {statusEvents.length ? (
+        <Card style={styles.card}>
+          <Text style={styles.subTitle}>Status history</Text>
+          {statusEvents.slice(0, 8).map((event) => (
+            <View key={event.id} style={styles.historyRow}>
+              <View style={styles.historyDot} />
+              <View style={styles.historyCopy}>
+                <Text style={styles.historyStatus}>{formatStatus(event.to_status)}</Text>
+                <Text style={styles.historyMeta}>{new Date(event.created_at).toLocaleString()}{event.reason ? ` · ${event.reason}` : ''}</Text>
+              </View>
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
       {storedEvidence.length ? (
         <Card style={styles.card}>
           <Text style={styles.subTitle}>Saved completion evidence</Text>
@@ -462,6 +512,11 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   metaText: { color: colors.muted, fontSize: 13, marginTop: spacing.sm },
   description: { color: colors.muted, lineHeight: 20, marginTop: spacing.md },
+  historyRow: { alignItems: 'flex-start', flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  historyDot: { backgroundColor: colors.teal, borderRadius: 999, height: 8, marginTop: 5, width: 8 },
+  historyCopy: { flex: 1 },
+  historyStatus: { color: colors.text, fontSize: 13, fontWeight: '800', textTransform: 'capitalize' },
+  historyMeta: { color: colors.muted, fontSize: 11, lineHeight: 17, marginTop: 2 },
   buttonRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   primary: { alignItems: 'center', backgroundColor: colors.teal, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'center', minHeight: 48, paddingHorizontal: spacing.md },
   primaryText: { color: colors.background, fontWeight: '800', textAlign: 'center' },
