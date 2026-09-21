@@ -149,6 +149,27 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const readWalkthroughIssues = async (companyId: string, sessionId: string) => {
+    let lastError: any = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await adminClient
+        .from("ai_walkthrough_issues")
+        .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
+        .eq("company_id", companyId)
+        .eq("session_id", sessionId)
+        .order("created_at");
+
+      if (!result.error) {
+        return { data: result.data ?? [], error: null };
+      }
+
+      lastError = result.error;
+      if (attempt < 2) await delay(250 * (2 ** attempt));
+    }
+
+    return { data: null, error: lastError };
+  };
+
   let companyId = "";
   let sessionId = "";
   try {
@@ -171,14 +192,9 @@ Deno.serve(async (req: Request) => {
     if (sessionError || !session) return json({ error: "walkthrough_not_found" }, 404);
 
     if (session.status === "completed") {
-      const { data: existing, error: existingError } = await adminClient
-        .from("ai_walkthrough_issues")
-        .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
-        .eq("company_id", companyId)
-        .eq("session_id", sessionId)
-        .order("created_at");
+      const { data: existing, error: existingError } = await readWalkthroughIssues(companyId, sessionId);
       if (existingError) {
-        return json({ ok: false, error: "results_read_failed", message: "The walkthrough completed, but its result list could not be loaded. Reopen the walkthrough to retry the results read." }, 200);
+        return json({ ok: false, error: "results_read_failed", message: "The walkthrough completed, but its result list could not be loaded after automatic retries. Reopen the walkthrough to retry the results read." }, 200);
       }
       return json({
         ok: true,
@@ -222,14 +238,9 @@ Deno.serve(async (req: Request) => {
     if (claimError) throw claimError;
 
     if (claimResult?.completed) {
-      const { data: completedIssues, error: completedIssuesError } = await adminClient
-        .from("ai_walkthrough_issues")
-        .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
-        .eq("company_id", companyId)
-        .eq("session_id", sessionId)
-        .order("created_at");
+      const { data: completedIssues, error: completedIssuesError } = await readWalkthroughIssues(companyId, sessionId);
       if (completedIssuesError) {
-        return json({ ok: false, error: "results_read_failed", message: "The walkthrough completed, but its result list could not be loaded. Reopen the walkthrough to retry the results read." }, 200);
+        return json({ ok: false, error: "results_read_failed", message: "The walkthrough completed, but its result list could not be loaded after automatic retries. Reopen the walkthrough to retry the results read." }, 200);
       }
       return json({
         ok: true,
@@ -562,12 +573,7 @@ Use JSON null for unknown nullable values. Do not use markdown fences, comments,
     });
     if (commitError) throw commitError;
 
-    const { data: createdIssues, error: createdIssuesError } = await adminClient
-      .from("ai_walkthrough_issues")
-      .select("id,issue_key,title,room_area,priority,department_id,confidence,needs_review,review_reason,work_order_id,status,depends_on_issue_keys")
-      .eq("company_id", companyId)
-      .eq("session_id", sessionId)
-      .order("created_at");
+    const { data: createdIssues, error: createdIssuesError } = await readWalkthroughIssues(companyId, sessionId);
 
     const committed = Array.isArray(commitResult?.created) ? commitResult.created : [];
     let responseIssues = createdIssues ?? [];
