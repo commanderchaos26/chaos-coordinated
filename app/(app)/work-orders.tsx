@@ -70,7 +70,7 @@ export default function WorkOrdersScreen() {
       const departmentIds = [...new Set(orders.map((item) => item.department_id).filter(Boolean) as string[])];
 
       const [assignmentsResult, propertiesResult, buildingsResult, unitsResult, departmentsResult] = await Promise.all([
-        orderIds.length ? supabase.from('assignments').select('id,work_order_id,employee_id,status,created_at').in('work_order_id', orderIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
+        orderIds.length ? supabase.from('assignments').select('id,work_order_id,employee_id,status,created_at').eq('company_id', current.companyId).in('work_order_id', orderIds).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
         propertyIds.length ? supabase.from('properties').select('id,name').in('id', propertyIds) : Promise.resolve({ data: [], error: null }),
         buildingIds.length ? supabase.from('buildings').select('id,name').in('id', buildingIds) : Promise.resolve({ data: [], error: null }),
         unitIds.length ? supabase.from('units').select('id,unit_number').in('id', unitIds) : Promise.resolve({ data: [], error: null }),
