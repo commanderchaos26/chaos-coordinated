@@ -1,0 +1,80 @@
+name: iOS Simulator Preview Build
+
+on:
+  push:
+    branches: [ios-preview-isolated]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'app.json'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ios-simulator-preview.yml'
+  workflow_dispatch:
+
+jobs:
+  ios-simulator:
+    runs-on: macos-26
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://twmjnbktebpaqwlsrgiy.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_kpa03UQVJ2ZQTWlJAdafmQ_VdLKF1WR
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Generate iOS native project only
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Build release app for iOS Simulator
+        run: |
+          set -euo pipefail
+          WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "No generated .xcworkspace found"
+            exit 1
+          fi
+          SCHEME="$(basename "$WORKSPACE" .xcworkspace)"
+          echo "Building workspace: $WORKSPACE"
+          echo "Using scheme: $SCHEME"
+          xcodebuild             -workspace "$WORKSPACE"             -scheme "$SCHEME"             -configuration Release             -sdk iphonesimulator             -destination 'generic/platform=iOS Simulator'             -derivedDataPath ios/build             CODE_SIGNING_ALLOWED=NO             build
+
+      - name: Package simulator app
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find ios/build/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No simulator .app found"
+            exit 1
+          fi
+          echo "Built app: $APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" Chaos-Coordinated-iOS-Simulator.app.zip
+          shasum -a 256 Chaos-Coordinated-iOS-Simulator.app.zip
+
+      - name: Upload iOS Simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-coordinated-ios-simulator
+          path: Chaos-Coordinated-iOS-Simulator.app.zip
+          if-no-files-found: error
+          retention-days: 14
