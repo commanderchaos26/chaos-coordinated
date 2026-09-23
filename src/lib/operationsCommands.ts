@@ -16,6 +16,7 @@ function messageFrom(value: unknown): string {
 
 function translateKnownError(raw: string): string {
   const message = raw.toLowerCase();
+  if (message.includes('company_suspended')) return 'This company is suspended. Existing data is read-only until the platform owner reactivates service.';
   if (message.includes('work_order_title_required')) return 'Enter a work-order title.';
   if (message.includes('work_order_title_too_long')) return 'The work-order title must be 240 characters or fewer.';
   if (message.includes('idempotency_key_required')) return 'The work-order save token is missing. Try saving again.';

@@ -25,6 +25,7 @@ type AssignmentRow = {
 };
 
 type WorkOrderSummary = { id: string; title: string; priority: string; due_at: string | null; status: string };
+const canUseOperations = (membership: Membership | null) => Boolean(membership?.roles.some((role) => ['owner', 'operations_manager', 'supervisor', 'dispatcher'].includes(role)));
 
 export default function HomeScreen() {
   const { signOut } = useAuth();
@@ -209,7 +210,7 @@ export default function HomeScreen() {
         </Card>;
       }) : <EmptyState icon="checkmark-done-outline" title="No active assignments" message="When you are assigned work, it will appear here with the right actions." />}
       {error && <Card style={styles.errorCard}><Text style={styles.errorText}>{error}</Text></Card>}
-      <SectionHeader title="Quick actions" /><View style={styles.actions}><ActionTile icon="time-outline" title="My time clock" subtitle="Clock in, clock out, and review this week" onPress={() => router.push('/(app)/time-clock' as never)} /><ActionTile icon="calendar-outline" title="My availability" subtitle="Submit or review your schedule" onPress={() => router.push('/(app)/availability' as never)} /><ActionTile icon="construct-outline" title="Work orders" subtitle="Review open tasks" onPress={() => router.push('/(app)/work-orders' as never)} /><ActionTile icon="people-outline" title="Management center" subtitle="People and operations" onPress={() => router.push('/(app)/management' as never)} /></View>
+      <SectionHeader title="Quick actions" /><View style={styles.actions}><ActionTile icon="time-outline" title="My time clock" subtitle="Clock in, clock out, and review this week" onPress={() => router.push('/(app)/time-clock' as never)} /><ActionTile icon="calendar-outline" title="My availability" subtitle="Submit or review your schedule" onPress={() => router.push('/(app)/availability' as never)} /><ActionTile icon="construct-outline" title="Work orders" subtitle="Review open tasks" onPress={() => router.push('/(app)/work-orders' as never)} />{canUseOperations(membership) ? <ActionTile icon="people-outline" title="Management center" subtitle="People and operations" onPress={() => router.push('/(app)/management' as never)} /> : null}</View>
     </ScrollView>
   );
 }
