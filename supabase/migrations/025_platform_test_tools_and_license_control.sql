@@ -276,7 +276,7 @@ begin
     'qa-assignment-'||v_assignment_id::text,
     jsonb_build_object('test',true,'work_order_id',v_work_order_id,'turnover_id',v_turnover_id)
   )
-  on conflict(dedupe_key) do nothing;
+  on conflict(company_id,employee_id,dedupe_key) do nothing;
 
   insert into public.platform_test_artifacts(
     company_id,test_account_id,property_id,building_id,unit_id,
