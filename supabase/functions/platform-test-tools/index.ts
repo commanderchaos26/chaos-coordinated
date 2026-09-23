@@ -65,7 +65,10 @@ Deno.serve(async (req: Request) => {
       .select("id,employee_id,auth_user_id,email,label,active,created_at,retired_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
-    if (error) return json({ error: "test_account_lookup_failed", detail: error.message }, 500);
+    if (error) {
+      console.error("test_account_lookup_failed", error);
+      return json({ error: "test_account_lookup_failed" }, 500);
+    }
     return json({ ok: true, company_status: company.status, accounts: accounts ?? [] });
   }
 
@@ -90,7 +93,10 @@ Deno.serve(async (req: Request) => {
         password,
         email_confirm: true,
       });
-      if (authUpdateError) return json({ error: "test_password_reset_failed", detail: authUpdateError.message }, 400);
+      if (authUpdateError) {
+        console.error("test_password_reset_failed", authUpdateError);
+        return json({ error: "test_password_reset_failed" }, 400);
+      }
       return json({ ok: true, idempotent: true, account: existing });
     }
     if (existing && !existing.active) {
@@ -104,7 +110,8 @@ Deno.serve(async (req: Request) => {
       user_metadata: { qa_test_account: true },
     });
     if (authError || !authCreated.user) {
-      return json({ error: "auth_user_create_failed", detail: authError?.message ?? "No user returned" }, 400);
+      console.error("auth_user_create_failed", authError ?? "No user returned");
+      return json({ error: "auth_user_create_failed" }, 400);
     }
 
     const authUserId = authCreated.user.id;
@@ -172,11 +179,8 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, idempotent: false, account }, 201);
     } catch (error) {
       await admin.auth.admin.deleteUser(authUserId).catch(() => undefined);
-      return json({
-        error: "test_account_create_failed",
-        detail: error instanceof Error ? error.message : String(error),
-        employee_id: employeeId,
-      }, 400);
+      console.error("test_account_create_failed", error);
+      return json({ error: "test_account_create_failed", employee_id: employeeId }, 400);
     }
   }
 
@@ -189,7 +193,10 @@ Deno.serve(async (req: Request) => {
       p_test_account_id: testAccountId,
       p_created_by_employee_id: callerLink.employee_id,
     });
-    if (error) return json({ error: "test_flow_seed_failed", detail: error.message }, 400);
+    if (error) {
+      console.error("test_flow_seed_failed", error);
+      return json({ error: "test_flow_seed_failed" }, 400);
+    }
     return json(data ?? { ok: true });
   }
 
@@ -206,13 +213,15 @@ Deno.serve(async (req: Request) => {
       p_company_id: companyId,
       p_test_account_id: testAccountId,
     });
-    if (error) return json({ error: "test_account_retire_failed", detail: error.message }, 400);
+    if (error) {
+      console.error("test_account_retire_failed", error);
+      return json({ error: "test_account_retire_failed" }, 400);
+    }
 
     const { error: deleteError } = await admin.auth.admin.deleteUser(account.auth_user_id);
     return json({
       ...(data ?? { ok: true }),
       auth_user_deleted: !deleteError,
-      auth_delete_warning: deleteError?.message ?? null,
     });
   }
 
