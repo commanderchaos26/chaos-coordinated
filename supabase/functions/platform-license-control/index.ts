@@ -46,7 +46,10 @@ Deno.serve(async (req: Request) => {
     .select("id,name,status,suspended_at,suspended_by_user_id,suspension_reason")
     .eq("id", companyId)
     .maybeSingle();
-  if (companyError) return json({ error: "company_lookup_failed", detail: companyError.message }, 500);
+  if (companyError) {
+    console.error("company_lookup_failed", companyError);
+    return json({ error: "company_lookup_failed" }, 500);
+  }
   if (!company) return json({ error: "company_not_found" }, 404);
 
   if (action === "status") {
@@ -112,7 +115,10 @@ Deno.serve(async (req: Request) => {
     .eq("id", companyId)
     .select("id,name,status,suspended_at,suspension_reason")
     .single();
-  if (updateError) return json({ error: "status_update_failed", detail: updateError.message }, 500);
+  if (updateError) {
+    console.error("status_update_failed", updateError);
+    return json({ error: "status_update_failed" }, 500);
+  }
 
   await admin.from("platform_license_events").insert({
     company_id: companyId,
