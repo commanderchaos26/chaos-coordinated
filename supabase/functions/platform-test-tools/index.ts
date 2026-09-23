@@ -178,6 +178,12 @@ Deno.serve(async (req: Request) => {
 
       return json({ ok: true, idempotent: false, account }, 201);
     } catch (error) {
+      if (employeeId) {
+        await admin.from("platform_test_accounts").delete().eq("company_id", companyId).eq("employee_id", employeeId);
+        await admin.from("role_grants").delete().eq("company_id", companyId).eq("employee_id", employeeId);
+        await admin.from("employee_account_links").delete().eq("company_id", companyId).eq("employee_id", employeeId);
+        await admin.from("employees").delete().eq("company_id", companyId).eq("id", employeeId);
+      }
       await admin.auth.admin.deleteUser(authUserId).catch(() => undefined);
       console.error("test_account_create_failed", error);
       return json({ error: "test_account_create_failed", employee_id: employeeId }, 400);
