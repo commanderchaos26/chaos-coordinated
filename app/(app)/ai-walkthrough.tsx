@@ -165,12 +165,26 @@ export default function AiWalkthroughScreen() {
     setError(null);
     try {
       const site = workSites.find((item) => item.property_id === propertyId) ?? null;
+      let turnoverForWalkthrough = selectedTurnItem?.turnover_id || linkedTurnoverId || null;
+
+      if (turnoverForWalkthrough) {
+        const { data: linkedTurnover, error: turnoverError } = await supabase
+          .from('turnovers')
+          .select('id')
+          .eq('company_id', membership.companyId)
+          .eq('property_id', propertyId)
+          .eq('id', turnoverForWalkthrough)
+          .maybeSingle();
+        if (turnoverError) throw turnoverError;
+        if (!linkedTurnover) turnoverForWalkthrough = null;
+      }
+
       const started = await startAiWalkthrough({
         p_company_id: membership.companyId,
         p_property_id: propertyId,
         p_building_id: buildingId || null,
         p_unit_id: unitId || null,
-        p_turnover_id: selectedTurnItem?.turnover_id || linkedTurnoverId || null,
+        p_turnover_id: turnoverForWalkthrough,
         p_work_site_id: site?.id ?? null,
       });
       setSession(started.session);

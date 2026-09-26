@@ -2,17 +2,37 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../../src/components/FieldUI';
+import { useAuth } from '../../src/context/AuthProvider';
 import { completeAdmission, loadMembership } from '../../src/lib/membership';
 import { supabase } from '../../src/lib/supabase';
 import { colors, spacing, typography } from '../../src/theme';
 
 export default function SetPasswordScreen() {
+  const { session, loading: authLoading } = useAuth();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
-    if (password.length < 10) return Alert.alert('Password too short', 'Use at least 10 characters.');
+    if (authLoading) return;
+    if (!session) {
+      return Alert.alert(
+        'Reset link required',
+        'Open the newest password reset email on this device, then return to the app from that link.',
+      );
+    }
+    if (
+      password.length < 10
+      || !/[a-z]/.test(password)
+      || !/[A-Z]/.test(password)
+      || !/[0-9]/.test(password)
+      || !/[^A-Za-z0-9]/.test(password)
+    ) {
+      return Alert.alert(
+        'Password requirements',
+        'Use at least 10 characters with an uppercase letter, lowercase letter, number, and symbol.',
+      );
+    }
     if (password !== confirm) return Alert.alert('Passwords do not match');
 
     setBusy(true);
@@ -43,13 +63,23 @@ export default function SetPasswordScreen() {
     <View style={styles.root}>
       <View style={styles.icon}><Icon name="lock-open-outline" color={colors.teal} size={25} /></View>
       <Text style={styles.title}>Set your password</Text>
-      <Text style={styles.subtitle}>Choose a new password for your Chaos Coordinated account.</Text>
+      <Text style={styles.subtitle}>
+        {authLoading
+          ? 'Checking your reset link...'
+          : session
+            ? 'Use at least 10 characters with uppercase, lowercase, a number, and a symbol.'
+            : 'Open the newest password reset email on this device to authorize a password change.'}
+      </Text>
       <Text style={styles.label}>New password</Text>
       <TextInput placeholder="At least 10 characters" placeholderTextColor={colors.subtle} secureTextEntry value={password} onChangeText={setPassword} style={styles.input} />
       <Text style={styles.label}>Confirm password</Text>
       <TextInput placeholder="Repeat your password" placeholderTextColor={colors.subtle} secureTextEntry value={confirm} onChangeText={setConfirm} style={styles.input} />
-      <Pressable onPress={save} disabled={busy} style={({ pressed }) => [styles.button, pressed && styles.pressed, busy && styles.disabled]}>
-        <Text style={styles.buttonText}>{busy ? 'Saving...' : 'Save password'}</Text>
+      <Pressable
+        onPress={save}
+        disabled={busy || authLoading || !session}
+        style={({ pressed }) => [styles.button, pressed && styles.pressed, (busy || authLoading || !session) && styles.disabled]}
+      >
+        <Text style={styles.buttonText}>{busy ? 'Saving...' : authLoading ? 'Checking link...' : 'Save password'}</Text>
         <Icon name="arrow-forward" color={colors.background} size={19} />
       </Pressable>
     </View>

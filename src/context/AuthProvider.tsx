@@ -32,9 +32,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleUrl = async (url: string) => {
       try {
-        const { type, isPasswordRoute } = await consumeAuthDeepLink(url);
+        const { type, sessionEstablished, isPasswordRoute } = await consumeAuthDeepLink(url);
         if (type === 'invite' || type === 'recovery' || isPasswordRoute) {
-          router.replace('/set-password');
+          const activeSession = sessionEstablished
+            ? true
+            : Boolean((await supabase.auth.getSession()).data.session);
+          if (activeSession) router.replace('/set-password');
         }
       } catch (error) {
         console.warn('Auth deep link failed', error);
