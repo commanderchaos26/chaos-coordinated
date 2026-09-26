@@ -1,25 +1,20 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Icon } from '../../src/components/FieldUI';
-import { useAuth } from '../../src/context/AuthProvider';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radius, spacing } from '../../src/theme';
 
 const PASSWORD_RECOVERY_REDIRECT = 'chaoscoordinated://set-password';
 
 export default function SignInScreen() {
-  const { session } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  useEffect(() => {
-    if (session) router.replace('/home');
-  }, [session]);
 
   const signIn = async () => {
     const workEmail = email.trim();
@@ -34,8 +29,9 @@ export default function SignInScreen() {
     if (error) return Alert.alert('Sign-in failed', error.message);
     if (!data.session) return Alert.alert('Sign-in failed', 'Supabase did not return an authenticated session. Try again.');
 
-    // AuthProvider receives the SIGNED_IN event and the effect above navigates only
-    // after the shared session state is ready, avoiding a redirect race.
+    // Navigate only for an explicit password sign-in. Recovery deep links establish
+    // their own temporary session and must remain on the set-password route.
+    router.replace('/home');
   };
 
   const recoverPassword = async () => {

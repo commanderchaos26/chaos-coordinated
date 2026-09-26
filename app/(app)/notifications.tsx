@@ -9,7 +9,19 @@ import { supabase } from '../../src/lib/supabase';
 import { colors, spacing, typography } from '../../src/theme';
 import type { Membership } from '../../src/types/app';
 
-type NotificationRow = { id: string; title: string | null; body: string | null; priority: string | null; created_at: string | null; acknowledged_at: string | null; read_at: string | null; work_order_id: string | null; assignment_id: string | null; };
+type NotificationRow = {
+  id: string;
+  title: string | null;
+  body: string | null;
+  priority: string | null;
+  created_at: string | null;
+  acknowledged_at: string | null;
+  read_at: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  assignment_id: string | null;
+  payload: { work_order_id?: string; assignment_id?: string } | null;
+};
 
 export default function NotificationsScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
@@ -17,12 +29,37 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => { setLoading(true); setError(null); try { const current = await loadMembership(); setMembership(current); if (!current) return; const { data, error: fetchError } = await supabase.from('employee_notifications').select('id,title,body,priority,created_at,acknowledged_at,read_at,work_order_id,assignment_id').eq('company_id', current.companyId).eq('employee_id', current.employeeId).order('created_at', { ascending: false }); if (fetchError) throw fetchError; setRows((data ?? []) as NotificationRow[]); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load notifications.'); } finally { setLoading(false); } };
+  const load = async () => { setLoading(true); setError(null); try { const current = await loadMembership(); setMembership(current); if (!current) return; const { data, error: fetchError } = await supabase.from('employee_notifications').select('id,title,body,priority,created_at,acknowledged_at,read_at,entity_type,entity_id,assignment_id,payload').eq('company_id', current.companyId).eq('employee_id', current.employeeId).order('created_at', { ascending: false }); if (fetchError) throw fetchError; setRows((data ?? []) as NotificationRow[]); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load notifications.'); } finally { setLoading(false); } };
 
   useEffect(() => { void load(); }, []);
   const unreadCount = useMemo(() => rows.filter((item) => !(item.read_at || item.acknowledged_at)).length, [rows]);
 
-  const openNotification = async (row: NotificationRow) => { if (!membership || !row.id) return; try { await markNotification({ p_company_id: membership.companyId, p_notification_id: row.id, p_acknowledge: true }); await load(); if (row.work_order_id) router.push({ pathname: '/(app)/task-detail' as never, params: { id: row.work_order_id } }); else if (row.assignment_id) router.push({ pathname: '/(app)/task-detail' as never, params: { assignmentId: row.assignment_id } }); } catch { if (row.work_order_id) router.push({ pathname: '/(app)/task-detail' as never, params: { id: row.work_order_id } }); else if (row.assignment_id) router.push({ pathname: '/(app)/task-detail' as never, params: { assignmentId: row.assignment_id } }); } };
+  const openNotification = async (row: NotificationRow) => {
+    if (!membership || !row.id) return;
+    const workOrderId = row.entity_type === 'work_order'
+      ? row.entity_id
+      : row.payload?.work_order_id ?? null;
+    const assignmentId = row.assignment_id ?? row.payload?.assignment_id ?? null;
+    const openRelatedWork = () => {
+      if (workOrderId) {
+        router.push({ pathname: '/(app)/task-detail' as never, params: { id: workOrderId } });
+      } else if (assignmentId) {
+        router.push({ pathname: '/(app)/task-detail' as never, params: { assignmentId } });
+      }
+    };
+
+    try {
+      await markNotification({
+        p_company_id: membership.companyId,
+        p_notification_id: row.id,
+        p_acknowledge: true,
+      });
+      await load();
+    } catch {
+      // Opening the related assignment should still work if acknowledgement fails.
+    }
+    openRelatedWork();
+  };
 
   if (loading) return <LoadingScreen label="Loading notifications..." />;
   if (!membership) return <Message title="Notifications unavailable" message="Your account is not linked to a company." />;
