@@ -75,6 +75,13 @@ begin
     )
     and not exists(
       select 1
+      from public.platform_test_accounts pta
+      where pta.company_id=p_company_id
+        and pta.employee_id=e.id
+        and pta.active=true
+    )
+    and not exists(
+      select 1
       from public.assignments previous
       where previous.company_id=p_company_id
         and previous.work_order_id=p_work_order_id
