@@ -3,14 +3,12 @@ import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Icon } from '../../src/components/FieldUI';
-import { useAuth } from '../../src/context/AuthProvider';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radius, spacing } from '../../src/theme';
 
 const PASSWORD_RECOVERY_REDIRECT = 'chaoscoordinated://set-password';
 
 export default function SignInScreen() {
-  useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
