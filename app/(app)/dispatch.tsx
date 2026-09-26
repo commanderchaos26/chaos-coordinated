@@ -276,7 +276,11 @@ export default function DispatchScreen() {
             );
           } catch (cause) {
             const message = cause instanceof Error ? cause.message : 'Could not assign work order.';
-            if (message.toLowerCase().includes('employee_unavailable')) {
+            const normalizedMessage = message.toLowerCase();
+            if (
+              normalizedMessage.includes('employee_unavailable')
+              || normalizedMessage.includes('unavailable during the chosen time window')
+            ) {
               setOverrideRequest({
                 employeeId,
                 employeeName: employee.display_name,
