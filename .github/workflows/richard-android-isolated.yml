@@ -17,9 +17,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
-      - uses: android-actions/setup-android@v3
-      - name: Android SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar" || (yes | sdkmanager "platforms;android-35")
+          test -d "$ANDROID_HOME/build-tools/35.0.0" || (yes | sdkmanager "build-tools;35.0.0")
       - name: Unpack isolated Richard code
         run: |
           mkdir -p "$RUNNER_TEMP/source"
