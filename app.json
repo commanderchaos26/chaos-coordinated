@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Chaos Coordinated",
-    "slug": "chaos-coordinated",
-    "scheme": "chaoscoordinated",
+    "name": "Chaos Coordinated QA",
+    "slug": "chaos-coordinated-ios-qa",
+    "scheme": "chaoscoordinatedqa",
     "version": "0.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -12,14 +12,14 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Chaos Coordinated uses your location only when you perform a work action that requires location verification."
+          "locationWhenInUsePermission": "Chaos Coordinated QA checks your location only when you perform a testing action requiring location verification."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Chaos Coordinated uses photos and videos as work evidence when you choose to attach them.",
-          "cameraPermission": "Chaos Coordinated uses the camera to capture work evidence when you choose to do so.",
+          "photosPermission": "Chaos Coordinated QA accesses only photos or videos you choose for test work evidence.",
+          "cameraPermission": "Chaos Coordinated QA uses the camera when you capture test work evidence.",
           "microphonePermission": false
         }
       ],
@@ -27,17 +27,18 @@
         "expo-notifications",
         {
           "color": "#32D4B3",
-          "defaultChannelName": "Assignments"
+          "defaultChannelName": "QA Assignments"
         }
       ]
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.digitaldivide.chaoscoordinated"
+      "bundleIdentifier": "com.digitaldivide.chaoscoordinated.qa",
+      "buildNumber": "1"
     },
     "android": {
-      "package": "com.digitaldivide.chaoscoordinated",
-      "versionCode": 2,
+      "package": "com.digitaldivide.chaoscoordinated.qa",
+      "versionCode": 1,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -48,11 +49,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "a8e01e90-c96c-4d01-a926-f0a830921b36"
-      }
-    },
-    "owner": "chaos-coordinator"
+      "router": {}
+    }
   }
 }
