@@ -40,3 +40,34 @@ jobs:
           name: richard-android-debug
           path: ${{ runner.temp }}/source/richard-companion/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+  android15-smoke:
+    needs: richard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: richard-android-debug
+          path: /tmp/richard-apk
+      - name: Emulator install and launch smoke test (API 35)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: |
+            set -euxo pipefail
+            adb install -r /tmp/richard-apk/app-debug.apk
+            adb shell am start -W -n com.chaos.richard/.MainActivity
+            sleep 5
+            adb shell dumpsys activity activities | grep -q 'com.chaos.richard'
+            adb shell uiautomator dump /sdcard/richard-ui.xml
+            adb shell cat /sdcard/richard-ui.xml | grep -q 'RICHARD'
+            adb shell pm path com.chaos.richard
+            echo 'PASS: Richard installed, launched, and rendered on Android API 35'
