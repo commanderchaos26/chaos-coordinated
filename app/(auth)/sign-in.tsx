@@ -7,7 +7,7 @@ import { useAuth } from '../../src/context/AuthProvider';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radius, spacing } from '../../src/theme';
 
-const PASSWORD_RECOVERY_REDIRECT = 'chaoscoordinated://set-password';
+const PASSWORD_RECOVERY_REDIRECT = 'chaoscoordinatedqa://set-password';
 
 export default function SignInScreen() {
   const { session } = useAuth();
