@@ -248,6 +248,9 @@ export default function AiWalkthroughScreen() {
         sessionId: session.id,
         finalizationKey: key,
       });
+      if (!finalized?.ok || !Array.isArray(finalized.issues) || finalized.issues.some((issue) => !issue.work_order_id)) {
+        throw new Error('The server did not confirm all generated work orders were saved. Reopen this walkthrough to recover the results.');
+      }
       if (selectedTurnItem && finalized.issues.length > 0) {
         try {
           await markTurnListItemProcessed(membership.companyId, selectedTurnItem.id, session.id);
@@ -358,7 +361,7 @@ export default function AiWalkthroughScreen() {
       <Pressable disabled={(!chunks.length && !observation.trim()) || busy} onPress={() => void finish()} style={[styles.finish, ((!chunks.length && !observation.trim()) || busy) && styles.disabled]}>
         <Icon name="sparkles" color={colors.background} size={20} /><Text style={styles.finishText}>{busy ? 'AI is building work orders...' : session.status === 'processing' ? 'Check Finalization & Recover Results' : session.status === 'failed' ? 'Retry Finalization' : 'Finish Walkthrough & Create Work Orders'}</Text>
       </Pressable>
-      <Text style={styles.finishNote}>The AI can create jobs, dependencies, and review flags. It does not dispatch employees automatically.</Text>
+      <Text style={styles.finishNote}>Eligible work orders are assigned automatically. Items needing AI review stay in the dispatch queue until approved.</Text>
     </>}
   </ScrollView>;
 }

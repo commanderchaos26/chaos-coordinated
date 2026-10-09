@@ -92,6 +92,9 @@ export default function NewWorkOrderScreen() {
         saveAttempt.current = { fingerprint, idempotencyKey: Crypto.randomUUID() };
       }
       const result = await createWorkOrder({ ...payload, p_idempotency_key: saveAttempt.current.idempotencyKey });
+      if (!result?.ok || !result.work_order?.id) {
+        throw new Error('The server did not confirm that this work order was saved. Check the queue before retrying.');
+      }
       saveAttempt.current = null;
       Alert.alert(
         result.idempotent ? 'Work order already saved' : 'Work order created',

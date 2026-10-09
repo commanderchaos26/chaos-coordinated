@@ -218,6 +218,12 @@ export default function TaskDetailScreen() {
         throw new Error('Start this assignment before completing work.');
       }
 
+      // Backend rejects turnover completion without persisted evidence. Mirror that
+      // requirement here so the worker gets a clear prompt before submitting.
+      if (workOrder.turnover_id && completionPhotos.length === 0 && storedEvidence.length === 0) {
+        throw new Error('Take at least one completion photo for this turnover before marking the work complete.');
+      }
+
       const photosToUpload = [...completionPhotos];
       for (const photo of photosToUpload) {
         await uploadCompletionPhoto({

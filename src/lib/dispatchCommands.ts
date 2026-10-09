@@ -17,8 +17,8 @@ function readableMessage(raw: unknown): string {
 function translateKnownError(message: string): string {
   const normalized = message.toLowerCase();
   if (normalized.includes('company_suspended')) return 'This company is suspended. Existing data is read-only until the platform owner reactivates service.';
-  if (normalized.includes('employee_unavailable')) return 'This employee is unavailable during the chosen time window. Add an override reason to authorize the assignment.';
-  if (normalized.includes('override_reason_required')) return 'An override reason is required when assigning during an availability conflict.';
+  if (normalized.includes('employee_unavailable')) return 'This employee has a scheduling conflict. Check availability, refresh the queue, or select a different employee.';
+  if (normalized.includes('override_reason_required')) return 'The server rejected this assignment under an outdated availability rule. Refresh and retry or contact management.';
   if (normalized.includes('invalid_assignment_transition')) return 'That assignment update is not valid for the current status.';
   if (normalized.includes('invalid_assignment_response_state')) return 'This assignment has already been answered. Refresh before taking another action.';
   if (normalized.includes('employee_account_not_active')) return 'This employee does not have an active app account and cannot receive assignments yet.';
