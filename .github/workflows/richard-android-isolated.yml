@@ -62,7 +62,7 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 600
           script: |
-            set -euxo pipefail
+            set -eu
             adb install -r /tmp/richard-apk/app-debug.apk
             adb shell am start -W -n com.chaos.richard/.MainActivity
             sleep 5
