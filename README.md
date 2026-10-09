@@ -1,3 +1,5 @@
+> **iOS QA branch — DO NOT MERGE INTO PRODUCTION.** This is a prepared, unsigned testing configuration, not a finished .ipa or a true GitHub fork. Before building, fork this branch into a separate repository, create an isolated staging Supabase backend, link a NEW EAS project, and provide authorized Apple signing. Full setup and tester steps: [docs/IOS_QA_ONBOARDING.md](docs/IOS_QA_ONBOARDING.md).
+
 # Chaos Coordinated Mobile
 
 Initial Expo/React Native foundation for Digital Divide LLC's Chaos Coordinated operations app.
