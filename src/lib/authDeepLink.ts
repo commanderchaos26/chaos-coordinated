@@ -45,7 +45,7 @@ export async function consumeAuthDeepLink(url: string) {
   }
 
   const target = url.split(/[?#]/, 1)[0].toLowerCase();
-  const isPasswordRoute = target === 'chaoscoordinated://set-password' || target.endsWith('/set-password');
+  const isPasswordRoute = target === 'chaoscoordinatedqa://set-password' || target.endsWith('/set-password');
 
   return { type, sessionEstablished, isPasswordRoute };
 }
