@@ -1,0 +1,30 @@
+name: iOS QA Static Validation
+
+on:
+  push:
+    branches:
+      - ios/apple-device-qa-20261009
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated QA branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate isolation and iOS configuration
+        run: node scripts/verify-ios-qa.cjs
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Verify Expo configuration
+        run: npx expo config --type public --json > /dev/null
