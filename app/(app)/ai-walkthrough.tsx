@@ -248,6 +248,9 @@ export default function AiWalkthroughScreen() {
         sessionId: session.id,
         finalizationKey: key,
       });
+      if (!finalized?.ok || !Array.isArray(finalized.issues) || finalized.issues.some((issue) => !issue.work_order_id)) {
+        throw new Error('The server did not confirm all generated work orders were saved. Reopen this walkthrough to recover the results.');
+      }
       if (selectedTurnItem && finalized.issues.length > 0) {
         try {
           await markTurnListItemProcessed(membership.companyId, selectedTurnItem.id, session.id);
