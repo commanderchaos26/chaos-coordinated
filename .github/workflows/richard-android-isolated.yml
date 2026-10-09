@@ -29,7 +29,9 @@ jobs:
       - name: Compile and unit test
         run: |
           cd "$RUNNER_TEMP/source/richard-companion"
-          bash scripts/test-core.sh
+          mkdir -p "$RUNNER_TEMP/core-tests"
+          javac -d "$RUNNER_TEMP/core-tests" app/src/main/java/com/chaos/richard/core/*.java scripts/PolicySelfTest.java
+          java -cp "$RUNNER_TEMP/core-tests" PolicySelfTest
           gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - name: Publish debug APK
         if: success()
